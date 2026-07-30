@@ -11,7 +11,7 @@ import {
   type TaskDefinition,
 } from "./challengeData";
 
-type Screen = "welcome" | "routes" | "assessment" | "app";
+type Screen = "welcome" | "routes" | "assessment" | "setup" | "app";
 type Tab = "today" | "progress" | "records" | "me";
 
 type Checkin = TaskDefinition & { done: boolean };
@@ -27,6 +27,14 @@ type DailyRecord = {
   stage: string;
   taskNotes?: Record<string, string>;
   completedAt?: string;
+  tasks?: TaskDefinition[];
+};
+
+type ChallengeSettings = {
+  wakeStart: string;
+  wakeEnd: string;
+  showReading: boolean;
+  showSkill: boolean;
 };
 
 const storageKey = "huixu-v1-state";
@@ -67,6 +75,13 @@ export default function HuixuApp() {
   const [searchingRecords, setSearchingRecords] = useState(false);
   const [reminder, setReminder] = useState({ morning: "08:00", evening: "22:30", enabled: false });
   const [toast, setToast] = useState("");
+  const [pendingRoute, setPendingRoute] = useState<RouteKey>("21");
+  const [challengeSettings, setChallengeSettings] = useState<ChallengeSettings>({
+    wakeStart: "08:00",
+    wakeEnd: "09:00",
+    showReading: true,
+    showSkill: true,
+  });
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -85,6 +100,7 @@ export default function HuixuApp() {
         setHistory(saved.history ?? []);
         setStartedAt(saved.startedAt ?? "");
         setReminder(saved.reminder ?? { morning: "08:00", evening: "22:30", enabled: false });
+        setChallengeSettings(saved.challengeSettings ?? { wakeStart: "08:00", wakeEnd: "09:00", showReading: true, showSkill: true });
       }
     } finally {
       setHydrated(true);
@@ -95,9 +111,9 @@ export default function HuixuApp() {
     if (!hydrated) return;
     localStorage.setItem(
       storageKey,
-      JSON.stringify({ screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder })
+      JSON.stringify({ screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder, challengeSettings })
     );
-  }, [screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder, hydrated]);
+  }, [screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder, challengeSettings, hydrated]);
 
   const completed = useMemo(() => checkins.filter((item) => item.done).length, [checkins]);
   const currentRoute = routeInfo[route];
@@ -133,6 +149,24 @@ export default function HuixuApp() {
   const filteredHistory = history.filter((record) =>
     `${record.stage}${record.status}${record.note}`.toLowerCase().includes(recordQuery.trim().toLowerCase())
   );
+
+  function configuredTasks(key: RouteKey, targetDay: number, settings = challengeSettings) {
+    return getTasks(key, targetDay)
+      .filter((task) => key !== "50" || task.id !== "long-read" || settings.showReading)
+      .filter((task) => key !== "50" || task.id !== "long-skill" || settings.showSkill)
+      .map((task) => task.id === "stable-wake" || task.id === "long-wake"
+        ? { ...task, detail: `${settings.wakeStart}—${settings.wakeEnd} 内起床`, description: `在你设置的 ${settings.wakeStart}—${settings.wakeEnd} 时间范围内起床并离开床铺。` }
+        : task);
+  }
+
+  function prepareRoute(key: RouteKey) {
+    setPendingRoute(key);
+    if (key === "7") {
+      startRoute(key);
+      return;
+    }
+    setScreen("setup");
+  }
 
   function showToast(message: string) {
     setToast(message);
@@ -190,7 +224,7 @@ export default function HuixuApp() {
   function startRoute(key: RouteKey) {
     setRoute(key);
     setDay(1);
-    setCheckins(getTasks(key, 1).map((item) => ({ ...item, done: false })));
+    setCheckins(configuredTasks(key, 1).map((item) => ({ ...item, done: false })));
     setNote("");
     setTaskNotes({});
     setSettled(false);
@@ -248,6 +282,7 @@ export default function HuixuApp() {
       stage: getStageLabel(route, day),
       taskNotes,
       completedAt: new Date().toISOString(),
+      tasks: checkins.map(({ done: _done, ...task }) => task),
     };
     setHistory((records) => [...records.filter((item) => item.day !== day), record].sort((a, b) => a.day - b.day));
     setSettled(true);
@@ -261,7 +296,7 @@ export default function HuixuApp() {
     }
     const next = day + 1;
     setDay(next);
-    setCheckins(getTasks(route, next).map((item) => ({ ...item, done: false })));
+    setCheckins(configuredTasks(route, next).map((item) => ({ ...item, done: false })));
     setNote("");
     setTaskNotes({});
     setSettled(false);
@@ -292,11 +327,15 @@ export default function HuixuApp() {
             <p className={styles.lead}>不需要一次改变所有事情。<br />从今天能承受的一件小事开始。</p>
           </div>
           <div className={styles.welcomeActions}>
-            <button className={styles.primaryButton} onClick={() => setScreen("routes")}>
+            <button className={styles.primaryButton} onClick={() => {
+              setAssessmentStep(0);
+              setAssessmentScore([]);
+              setScreen("assessment");
+            }}>
               开始探索
             </button>
             <button className={styles.textButton} onClick={() => setScreen("routes")}>
-              直接选择路线
+              直接开始挑战
             </button>
           </div>
           <p className={styles.localNote}><span>◉</span> 你的记录默认只保存在这台设备上</p>
@@ -329,7 +368,7 @@ export default function HuixuApp() {
                     <p>{item.description}</p>
                     <small>{item.structure}</small>
                   </div>
-                  <button onClick={() => startRoute(key)} aria-label={`开始${item.name}`}>开始</button>
+                  <button onClick={() => prepareRoute(key)} aria-label={`开始${item.name}`}>选择</button>
                 </article>
               );
             })}
@@ -380,11 +419,55 @@ export default function HuixuApp() {
               <h1>{routeInfo[recommended].name}</h1>
               <h2>{routeInfo[recommended].label}</h2>
               <p>{routeInfo[recommended].description} 这不是能力判断，只是帮你选择此刻更容易开始的坡度。</p>
-              <button className={styles.primaryButton} onClick={() => startRoute(recommended)}>从这里开始</button>
+              <button className={styles.primaryButton} onClick={() => prepareRoute(recommended)}>从这里开始</button>
               <button className={styles.textButton} onClick={() => setScreen("routes")}>仍然查看其他路线</button>
               <button className={styles.textButton} onClick={() => { setAssessmentStep(0); setAssessmentScore([]); }}>重新测试</button>
             </section>
           )}
+        </section>
+      </main>
+    );
+  }
+
+  if (screen === "setup") {
+    const selected = routeInfo[pendingRoute];
+    return (
+      <main className={styles.centerStage}>
+        <section className={`${styles.phoneShell} ${styles.setupShell}`}>
+          <header className={styles.pageHeader}>
+            <button className={styles.iconButton} onClick={() => setScreen("routes")} aria-label="返回">‹</button>
+            <div><p className={styles.eyebrow}>开始前设置</p><h1>把节奏设成<br />适合你的样子。</h1></div>
+          </header>
+          <section className={styles.setupRoute}>
+            <small>{selected.days} DAYS</small>
+            <h2>{selected.name}</h2>
+            <p>{selected.description}</p>
+          </section>
+          <div className={styles.setupGroup}>
+            <div className={styles.setupTitle}><span>你的起床范围</span><small>保持一小时，不要求越早越好</small></div>
+            <div className={styles.wakeRange}>
+              <label><span>从</span><input type="time" value={challengeSettings.wakeStart} onChange={(event) => {
+                const start = event.target.value;
+                const [hour, minute] = start.split(":").map(Number);
+                const end = `${String((hour + 1) % 24).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+                setChallengeSettings({ ...challengeSettings, wakeStart: start, wakeEnd: end });
+              }} /></label>
+              <i>—</i>
+              <label><span>到</span><input type="time" value={challengeSettings.wakeEnd} readOnly /></label>
+            </div>
+            <p className={styles.setupHint}>挑战开始后，“起居”将显示为：在 {challengeSettings.wakeStart}—{challengeSettings.wakeEnd} 内起床。</p>
+          </div>
+          {pendingRoute === "50" && (
+            <div className={styles.setupGroup}>
+              <div className={styles.setupTitle}><span>可选成长挑战</span><small>不参与每日达标判断</small></div>
+              <label className={styles.optionRow}><span><b>阅读半小时</b><small>在今日页显示</small></span><input type="checkbox" checked={challengeSettings.showReading} onChange={(event) => setChallengeSettings({ ...challengeSettings, showReading: event.target.checked })} /></label>
+              <label className={styles.optionRow}><span><b>学习新技能</b><small>在今日页显示</small></span><input type="checkbox" checked={challengeSettings.showSkill} onChange={(event) => setChallengeSettings({ ...challengeSettings, showSkill: event.target.checked })} /></label>
+            </div>
+          )}
+          <div className={styles.setupActions}>
+            <button className={styles.primaryButton} onClick={() => startRoute(pendingRoute)}>今天开始挑战</button>
+            <p>设置会保存在这台设备上，之后可以调整。</p>
+          </div>
         </section>
       </main>
     );
@@ -655,7 +738,7 @@ export default function HuixuApp() {
                   <h2>{detailRecord.stage}</h2>
                   <span className={styles.statusPill}>{detailRecord.status}</span>
                   <div className={styles.recordTaskList}>
-                    {getTasks(route, detailRecord.day).map((task) => (
+                    {(detailRecord.tasks ?? getTasks(route, detailRecord.day)).map((task) => (
                       <div key={task.id} className={detailRecord.doneIds.includes(task.id) ? styles.recordDone : ""}>
                         <span>{task.icon}</span><b>{task.name}<small>{detailRecord.taskNotes?.[task.id]}</small></b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : "—"}</i>
                       </div>
@@ -684,7 +767,24 @@ export default function HuixuApp() {
                 <label><span>早晨开始</span><input type="time" value={reminder.morning} onChange={(event) => setReminder({ ...reminder, morning: event.target.value })} /></label>
                 <label><span>晚间收尾</span><input type="time" value={reminder.evening} onChange={(event) => setReminder({ ...reminder, evening: event.target.value })} /></label>
               </div>
-              <button className={styles.primaryButton} onClick={() => { setSettingsOpen(false); showToast("提醒时间已保存"); }}>保存设置</button>
+              {route !== "7" && (
+                <div className={styles.inlineWakeSetting}>
+                  <span>起床范围</span>
+                  <div><input type="time" value={challengeSettings.wakeStart} onChange={(event) => {
+                    const start = event.target.value;
+                    const [hour, minute] = start.split(":").map(Number);
+                    const end = `${String((hour + 1) % 24).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+                    setChallengeSettings({ ...challengeSettings, wakeStart: start, wakeEnd: end });
+                  }} /><i>—</i><input type="time" value={challengeSettings.wakeEnd} readOnly /></div>
+                </div>
+              )}
+              <button className={styles.primaryButton} onClick={() => {
+                if (!settled) setCheckins((items) => items.map((item) => item.id === "stable-wake" || item.id === "long-wake"
+                  ? { ...item, detail: `${challengeSettings.wakeStart}—${challengeSettings.wakeEnd} 内起床`, description: `在你设置的 ${challengeSettings.wakeStart}—${challengeSettings.wakeEnd} 时间范围内起床并离开床铺。` }
+                  : item));
+                setSettingsOpen(false);
+                showToast("设置已保存");
+              }}>保存设置</button>
             </section>
           </div>
         )}
