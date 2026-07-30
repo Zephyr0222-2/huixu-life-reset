@@ -55,6 +55,8 @@ export default function HuixuApp() {
   const [history, setHistory] = useState<DailyRecord[]>([]);
   const [startedAt, setStartedAt] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  const [detailTask, setDetailTask] = useState<Checkin | null>(null);
+  const [detailRecord, setDetailRecord] = useState<DailyRecord | null>(null);
 
   useEffect(() => {
     try {
@@ -91,6 +93,16 @@ export default function HuixuApp() {
     [route, checkins, day]
   );
   const countedDays = history.filter((record) => record.counted).length;
+  const completionRate = history.length ? Math.round((countedDays / history.length) * 100) : 0;
+  const longestStreak = useMemo(() => {
+    let longest = 0;
+    let current = 0;
+    history.forEach((record) => {
+      current = record.counted ? current + 1 : 0;
+      longest = Math.max(longest, current);
+    });
+    return longest;
+  }, [history]);
 
   function startRoute(key: RouteKey) {
     setRoute(key);
@@ -244,7 +256,21 @@ export default function HuixuApp() {
               <button className={styles.sunButton} aria-label="页面设置">☼</button>
             </header>
 
-            {lifecycle === "paused" ? (
+            {lifecycle === "finished" ? (
+              <section className={styles.finishPanel}>
+                <div className={styles.finishHalo}><BrandOrbit compact /></div>
+                <span className={styles.statusPill}>本轮挑战已完成</span>
+                <h2>你把生活，带回了自己的手里。</h2>
+                <p>{currentRoute.days} 天不是终点，而是一套可以再次回来的秩序。</p>
+                <div className={styles.finishStats}>
+                  <div><strong>{countedDays}</strong><small>达标日</small></div>
+                  <div><strong>{completionRate}%</strong><small>稳定率</small></div>
+                  <div><strong>{longestStreak}</strong><small>最长连续</small></div>
+                </div>
+                <button className={styles.primaryButton} onClick={() => setTab("records")}>回看这段旅程</button>
+                <button className={styles.textButton} onClick={() => setScreen("routes")}>选择新的路线</button>
+              </section>
+            ) : lifecycle === "paused" ? (
               <section className={styles.pausePanel}>
                 <BrandOrbit compact />
                 <span>挑战已暂停</span>
@@ -293,7 +319,6 @@ export default function HuixuApp() {
                       className={`${styles.checkinPanel} ${styles[item.tone]} ${item.done ? styles.checked : ""}`}
                       onClick={() => toggleCheckin(item.id)}
                       aria-pressed={item.done}
-                      title={item.description}
                     >
                       <span className={styles.checkinIcon}>{item.icon}</span>
                       <span className={styles.checkinText}>
@@ -301,6 +326,23 @@ export default function HuixuApp() {
                         <small>{item.detail}</small>
                       </span>
                       <span className={styles.checkCircle}>{item.done ? "✓" : ""}</span>
+                      <span
+                        className={styles.infoButton}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`查看${item.name}说明`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDetailTask(item);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setDetailTask(item);
+                          }
+                        }}
+                      >···</span>
                     </button>
                   ))}
                 </div>
@@ -345,7 +387,7 @@ export default function HuixuApp() {
             </div>
             <div className={styles.statGrid}>
               <article><span>☼</span><p>{route === "7" ? "完成日" : route === "21" ? "稳定日" : "累计达标"}</p><strong>{countedDays} <small>/ {route === "7" ? 5 : route === "21" ? 15 : 40}</small></strong></article>
-              <article><span>◌</span><p>{route === "21" ? "轮换挑战" : "当前阶段"}</p><strong>{route === "21" ? Math.min(7, Math.ceil(day / 3)) : day} <small>{route === "21" ? "/ 7组" : `/ ${currentRoute.days}`}</small></strong></article>
+              <article><span>◌</span><p>最长连续</p><strong>{longestStreak} <small>天</small></strong></article>
             </div>
             <article className={styles.insightCard}>
               <div className={styles.insightOrb} />
@@ -364,7 +406,7 @@ export default function HuixuApp() {
             <div className={styles.recordTimeline}>
               {history.length === 0 && <div className={styles.emptyState}>第一条记录会在你完成今日结算后出现在这里。</div>}
               {[...history].reverse().map((record) => (
-                <article key={record.day}>
+                <article key={record.day} className={styles.recordItem} onClick={() => setDetailRecord(record)}>
                   <div className={`${styles.timelineDot} ${!record.counted ? styles.partial : ""}`} />
                   <time>{record.date}</time>
                   <div>
@@ -412,19 +454,62 @@ export default function HuixuApp() {
             </button>
           ))}
         </nav>
+
+        {(detailTask || detailRecord) && (
+          <div className={styles.sheetBackdrop} onClick={() => { setDetailTask(null); setDetailRecord(null); }}>
+            <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label={detailTask ? "行动说明" : "记录详情"} onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} />
+              {detailTask ? (
+                <>
+                  <div className={`${styles.sheetIcon} ${styles[detailTask.tone]}`}>{detailTask.icon}</div>
+                  <small>{detailTask.category === "anchor" ? "稳定锚点" : detailTask.category === "optional" ? "可选挑战" : "今日行动"}</small>
+                  <h2>{detailTask.name}</h2>
+                  <p>{detailTask.description}</p>
+                  <div className={styles.sheetTip}><span>建议</span>只需要完成最低标准，不必把一次行动做成新的压力。</div>
+                  <button className={styles.primaryButton} onClick={() => {
+                    toggleCheckin(detailTask.id);
+                    setDetailTask(null);
+                  }}>{detailTask.done ? "取消完成" : "标记为完成"}</button>
+                </>
+              ) : detailRecord ? (
+                <>
+                  <small>DAY {String(detailRecord.day).padStart(2, "0")} · {detailRecord.date}</small>
+                  <h2>{detailRecord.stage}</h2>
+                  <span className={styles.statusPill}>{detailRecord.status}</span>
+                  <div className={styles.recordTaskList}>
+                    {getTasks(route, detailRecord.day).map((task) => (
+                      <div key={task.id} className={detailRecord.doneIds.includes(task.id) ? styles.recordDone : ""}>
+                        <span>{task.icon}</span><b>{task.name}</b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : "—"}</i>
+                      </div>
+                    ))}
+                  </div>
+                  {detailRecord.note && <blockquote>“{detailRecord.note}”</blockquote>}
+                  <button className={styles.secondaryButton} onClick={() => setDetailRecord(null)}>关闭</button>
+                </>
+              ) : null}
+            </section>
+          </div>
+        )}
       </section>
     </main>
   );
 }
 
 function WeekStrip() {
-  const days = [
-    ["一", "19"], ["二", "20"], ["三", "21"], ["四", "22"], ["五", "23"], ["六", "24"], ["日", "25"],
-  ];
+  const today = new Date();
+  const monday = new Date(today);
+  const offset = (today.getDay() + 6) % 7;
+  monday.setDate(today.getDate() - offset);
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  const days = labels.map((label, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return [label, String(date.getDate()), date.toDateString() === today.toDateString()] as const;
+  });
   return (
     <div className={styles.weekStrip}>
-      {days.map(([week, date], index) => (
-        <span key={date} className={index === 2 ? styles.todayDate : ""}><small>{week}</small><b>{date}</b></span>
+      {days.map(([week, date, isToday]) => (
+        <span key={`${week}-${date}`} className={isToday ? styles.todayDate : ""}><small>{week}</small><b>{date}</b></span>
       ))}
     </div>
   );
