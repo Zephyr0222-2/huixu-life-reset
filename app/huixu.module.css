@@ -1090,6 +1090,242 @@
   cursor: pointer;
 }
 
+.assessmentShell {
+  padding: 24px 24px 30px;
+  display: flex;
+  flex-direction: column;
+}
+
+.assessmentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.assessmentHeader > span {
+  color: #919aaf;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.assessmentProgress {
+  height: 4px;
+  margin: 26px 0 52px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(145,158,189,.13);
+}
+
+.assessmentProgress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8fc4ea, #b3a0df);
+  transition: width .35s ease;
+}
+
+.assessmentCopy small,
+.assessmentResult > small {
+  color: #8495bd;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+
+.assessmentCopy h1,
+.assessmentResult h1 {
+  margin: 12px 0 12px;
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 1.35;
+  font-weight: 610;
+  letter-spacing: -.03em;
+}
+
+.assessmentCopy p,
+.assessmentResult p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.answerList {
+  display: grid;
+  gap: 12px;
+  margin-top: 42px;
+}
+
+.answerList button {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255,255,255,.82);
+  border-radius: 20px;
+  color: #68758f;
+  background: linear-gradient(110deg, rgba(235,246,253,.72), rgba(243,239,251,.68));
+  box-shadow: 0 9px 22px rgba(98,112,156,.06);
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.answerList button span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #7f8fba;
+  background: rgba(255,255,255,.62);
+  font-size: 10px;
+}
+
+.assessmentResult {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.assessmentResult h2 {
+  margin: -5px 0 14px;
+  color: #7785a3;
+  font-size: 14px;
+  font-weight: 530;
+}
+
+.assessmentResult p {
+  max-width: 290px;
+  margin-bottom: 30px;
+}
+
+.assessmentResult .primaryButton {
+  max-width: 300px;
+}
+
+.searchField {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 28px 1fr 30px;
+  align-items: center;
+  margin: -6px 0 16px;
+  padding: 5px 11px;
+  border-radius: 16px;
+  border: 1px solid rgba(145,157,188,.14);
+  background: rgba(255,255,255,.58);
+  color: #8f9aaf;
+}
+
+.searchField input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.searchField button {
+  border: 0;
+  background: transparent;
+  color: #929caf;
+  font-size: 18px;
+}
+
+.toggleRow {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 0 12px;
+  padding: 10px 14px;
+  border-radius: 17px;
+  background: rgba(237,242,250,.7);
+}
+
+.toggleRow > span {
+  display: grid;
+  gap: 4px;
+}
+
+.toggleRow b {
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.toggleRow small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.toggleRow input {
+  width: 38px;
+  height: 22px;
+  accent-color: #879fd5;
+}
+
+.timeGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.timeGrid label {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.68);
+  border: 1px solid rgba(143,157,187,.12);
+}
+
+.timeGrid span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.timeGrid input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: #7182ad;
+  background: transparent;
+  font-size: 15px;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.toast {
+  position: absolute;
+  z-index: 30;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  min-width: 160px;
+  padding: 11px 16px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(72,82,107,.86);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px rgba(59,69,96,.18);
+  text-align: center;
+  font-size: 10px;
+  animation: toastIn .24s ease;
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
 @keyframes veilIn {
   from { opacity: 0; }
   to { opacity: 1; }
