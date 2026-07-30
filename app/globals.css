@@ -1,0 +1,48 @@
+:root {
+  --moon: #f8faff;
+  --surface: rgba(255, 255, 255, 0.78);
+  --ink: #3b4358;
+  --muted: #788097;
+  --faint: #a4adbf;
+  --line: rgba(151, 162, 190, 0.17);
+  --blue: #b9d9f5;
+  --blue-strong: #7faed7;
+  --blue-mist: #edf5fc;
+  --purple: #d5c9f2;
+  --purple-strong: #a493d6;
+  --purple-mist: #f3effb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: #eef2fb;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 20% -10%, rgba(185, 217, 245, 0.7), transparent 34rem),
+    radial-gradient(circle at 90% 20%, rgba(213, 201, 242, 0.52), transparent 32rem),
+    var(--moon);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: rgba(185, 217, 245, 0.85);
+}
