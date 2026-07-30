@@ -669,6 +669,12 @@
   background: rgba(255,255,255,.65);
 }
 
+.dayGrid .partial {
+  color: #7f8aa3;
+  border: 1px solid rgba(155, 163, 192, .3);
+  background: linear-gradient(135deg, rgba(185, 217, 245, .62) 0 50%, rgba(255,255,255,.55) 50% 100%);
+}
+
 .dayGrid .future { opacity: .55; }
 
 .statGrid {
@@ -804,6 +810,52 @@
 .settingsGroup button div { display: grid; gap: 4px; }
 .settingsGroup b { font-size: 12px; font-weight: 550; }
 .settingsGroup small { color: var(--muted); font-size: 9px; }
+
+.pausePanel {
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.pausePanel > span {
+  margin-top: 22px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: var(--purple-mist);
+  color: #817bb0;
+  font-size: 10px;
+}
+
+.pausePanel h2 {
+  margin: 18px 0 8px;
+  font-size: 23px;
+  font-weight: 610;
+}
+
+.pausePanel p {
+  max-width: 270px;
+  margin: 0 0 30px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.pausePanel .primaryButton {
+  max-width: 280px;
+}
+
+.emptyState {
+  padding: 42px 24px;
+  border-radius: 20px;
+  text-align: center;
+  color: var(--muted);
+  background: rgba(255,255,255,.45);
+  font-size: 11px;
+  line-height: 1.7;
+}
 
 @media (max-width: 520px) {
   .centerStage,
