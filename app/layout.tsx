@@ -4,6 +4,12 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "回序｜从混乱，回到自己的节奏",
   description: "一套帮助你重新建立稳定生活秩序的渐进式挑战系统。",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "回序",
+  },
   openGraph: {
     title: "回序｜从混乱，回到自己的节奏",
     description: "7日清场、21日稳定、50日挑战。从今天能承受的一件小事开始。",

@@ -15,7 +15,7 @@ type Screen = "welcome" | "routes" | "assessment" | "setup" | "app";
 type Tab = "today" | "progress" | "records" | "me";
 
 type Checkin = TaskDefinition & { done: boolean };
-type Lifecycle = "active" | "paused" | "finished";
+type Lifecycle = "preparing" | "active" | "paused" | "finished" | "ended";
 type DailyRecord = {
   day: number;
   date: string;
@@ -23,6 +23,7 @@ type DailyRecord = {
   statusKey: string;
   counted: boolean;
   doneIds: string[];
+  skippedIds?: string[];
   note: string;
   stage: string;
   taskNotes?: Record<string, string>;
@@ -35,6 +36,16 @@ type ChallengeSettings = {
   wakeEnd: string;
   showReading: boolean;
   showSkill: boolean;
+};
+
+type ChallengeArchive = {
+  id: string;
+  route: RouteKey;
+  status: Lifecycle;
+  startedAt: string;
+  endedAt: string;
+  history: DailyRecord[];
+  settings: ChallengeSettings;
 };
 
 const storageKey = "huixu-v1-state";
@@ -61,6 +72,7 @@ export default function HuixuApp() {
   );
   const [note, setNote] = useState("");
   const [taskNotes, setTaskNotes] = useState<Record<string, string>>({});
+  const [skippedIds, setSkippedIds] = useState<string[]>([]);
   const [settled, setSettled] = useState(false);
   const [lifecycle, setLifecycle] = useState<Lifecycle>("active");
   const [history, setHistory] = useState<DailyRecord[]>([]);
@@ -82,38 +94,104 @@ export default function HuixuApp() {
     showReading: true,
     showSkill: true,
   });
+  const [startChoice, setStartChoice] = useState<"today" | "tomorrow">("today");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [challengeId, setChallengeId] = useState("");
+  const [archives, setArchives] = useState<ChallengeArchive[]>([]);
+  const [recordMode, setRecordMode] = useState<"timeline" | "calendar">("timeline");
+  const [recordFilter, setRecordFilter] = useState<"all" | "counted" | "not-counted">("all");
+  const [undoUntil, setUndoUntil] = useState(0);
+  const [now, setNow] = useState(Date.now());
+  const [endingOpen, setEndingOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState<ChallengeArchive | null>(null);
+  const [supplementText, setSupplementText] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        setScreen(saved.screen ?? "welcome");
-        setRoute(saved.route ?? "21");
-        setDay(saved.day ?? 8);
-        setCheckins(saved.checkins ?? getTasks("21", 8).map((task, index) => ({ ...task, done: index < 2 })));
-        setNote(saved.note ?? "");
-        setTaskNotes(saved.taskNotes ?? {});
-        setSettled(saved.settled ?? false);
-        setLifecycle(saved.lifecycle ?? "active");
-        setHistory(saved.history ?? []);
-        setStartedAt(saved.startedAt ?? "");
-        setReminder(saved.reminder ?? { morning: "08:00", evening: "22:30", enabled: false });
-        setChallengeSettings(saved.challengeSettings ?? { wakeStart: "08:00", wakeEnd: "09:00", showReading: true, showSkill: true });
+    let active = true;
+    (async () => {
+      try {
+        const indexed = await readIndexedState();
+        const raw = indexed ? JSON.stringify(indexed) : localStorage.getItem(storageKey);
+        if (raw && active) {
+          const saved = JSON.parse(raw);
+          const savedRoute: RouteKey = saved.route ?? "21";
+          const savedHistory: DailyRecord[] = saved.history ?? [];
+          const savedDay = saved.day ?? 1;
+          const canAdvanceByDate = saved.lifecycle === "active" && saved.startedAt;
+          const elapsed = canAdvanceByDate ? Math.max(0, Math.floor((Date.now() - new Date(saved.startedAt).getTime()) / 86400000)) : 0;
+          const targetDay = Math.min(routeInfo[savedRoute].days, Math.max(savedDay, elapsed + 1));
+          const crossedDay = targetDay > savedDay;
+          const missed = crossedDay ? Array.from({ length: targetDay - savedDay }, (_, index) => savedDay + index)
+            .filter((missedDay) => !savedHistory.some((record) => record.day === missedDay))
+            .map((missedDay) => ({
+              day: missedDay,
+              date: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(new Date(saved.startedAt).getTime() + (missedDay - 1) * 86400000)),
+              status: "未记录",
+              statusKey: "unrecorded",
+              counted: false,
+              doneIds: [],
+              note: "",
+              stage: getStageLabel(savedRoute, missedDay),
+              tasks: missedDay === savedDay && saved.checkins
+                ? saved.checkins.map(({ done: _done, ...task }: Checkin) => task)
+                : getTasks(savedRoute, missedDay),
+            } satisfies DailyRecord)) : [];
+          setScreen(saved.screen ?? "welcome");
+          setRoute(savedRoute);
+          setDay(targetDay);
+          setCheckins(crossedDay ? getTasks(savedRoute, targetDay).map((task) => ({ ...task, done: false })) : saved.checkins ?? getTasks(savedRoute, targetDay).map((task) => ({ ...task, done: false })));
+          setNote(crossedDay ? "" : saved.note ?? "");
+          setTaskNotes(crossedDay ? {} : saved.taskNotes ?? {});
+          setSkippedIds(crossedDay ? [] : saved.skippedIds ?? []);
+          setSettled(crossedDay ? false : saved.settled ?? false);
+          setLifecycle(saved.lifecycle ?? "active");
+          setHistory([...savedHistory, ...missed].sort((a, b) => a.day - b.day));
+          setStartedAt(saved.startedAt ?? "");
+          setReminder(saved.reminder ?? { morning: "08:00", evening: "22:30", enabled: false });
+          setChallengeSettings(saved.challengeSettings ?? { wakeStart: "08:00", wakeEnd: "09:00", showReading: true, showSkill: true });
+          setScheduledDate(saved.scheduledDate ?? "");
+          setChallengeId(saved.challengeId ?? "");
+          setArchives(saved.archives ?? []);
+          setUndoUntil(crossedDay ? 0 : saved.undoUntil ?? 0);
+        }
+      } finally {
+        if (active) setHydrated(true);
       }
-    } finally {
-      setHydrated(true);
-    }
+    })();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({ screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder, challengeSettings })
-    );
-  }, [screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder, challengeSettings, hydrated]);
+    const state = { screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, schemaVersion: 2 };
+    localStorage.setItem(storageKey, JSON.stringify(state));
+    void writeIndexedState(state);
+  }, [screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, hydrated]);
+
+  useEffect(() => {
+    if (!undoUntil || undoUntil <= Date.now()) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [undoUntil]);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
+  }, []);
+
+  useEffect(() => {
+    if (!reminder.enabled || lifecycle !== "active" || !("Notification" in window) || Notification.permission !== "granted") return;
+    const timers = [reminder.morning, reminder.evening].map((time, index) => {
+      const [hour, minute] = time.split(":").map(Number);
+      const target = new Date();
+      target.setHours(hour, minute, 0, 0);
+      if (target.getTime() <= Date.now()) target.setDate(target.getDate() + 1);
+      return window.setTimeout(() => new Notification(index === 0 ? "回序 · 今天" : "回序 · 晚间收尾", {
+        body: index === 0 ? "今天的挑战已经准备好，从能承受的一件事开始。" : "今天的记录还没有结束，需要时可以回来继续。",
+      }), target.getTime() - Date.now());
+    });
+    return () => timers.forEach(window.clearTimeout);
+  }, [reminder, lifecycle]);
 
   const completed = useMemo(() => checkins.filter((item) => item.done).length, [checkins]);
   const currentRoute = routeInfo[route];
@@ -136,6 +214,9 @@ export default function HuixuApp() {
     reading: history.filter((record) => record.doneIds.includes("long-read")).length,
     skill: history.filter((record) => record.doneIds.includes("long-skill")).length,
   };
+  const participatedGroups = new Set(history.flatMap((record) =>
+    record.doneIds.filter((id) => id.startsWith("rotation-")).map(() => Math.floor((record.day - 1) / 3) + 1)
+  )).size;
   const finalRequiredDone = route === "7"
     ? Boolean(taskNotes["clear-card"]?.trim())
     : route === "21"
@@ -144,11 +225,14 @@ export default function HuixuApp() {
   const challengePassed = route === "7"
     ? countedDays >= 5 && history.some((record) => record.day === 7 && record.doneIds.includes("clear-card") && record.taskNotes?.["clear-card"]?.trim())
     : route === "21"
-      ? countedDays >= 15 && history.some((record) => record.day === 21 && record.doneIds.includes("rotation-prepare") && record.taskNotes?.["rotation-prepare"]?.trim())
+      ? countedDays >= 15 && participatedGroups >= 5 && history.some((record) => record.day === 21 && record.doneIds.includes("rotation-prepare") && record.taskNotes?.["rotation-prepare"]?.trim())
       : countedDays >= 40;
-  const filteredHistory = history.filter((record) =>
-    `${record.stage}${record.status}${record.note}`.toLowerCase().includes(recordQuery.trim().toLowerCase())
-  );
+  const filteredHistory = history.filter((record) => {
+    const matchesText = `${record.stage}${record.status}${record.note}${Object.values(record.taskNotes ?? {}).join("")}`.toLowerCase().includes(recordQuery.trim().toLowerCase());
+    const matchesStatus = recordFilter === "all" || (recordFilter === "counted" ? record.counted : !record.counted);
+    return matchesText && matchesStatus;
+  });
+  const undoSeconds = Math.max(0, Math.ceil((undoUntil - now) / 1000));
 
   function configuredTasks(key: RouteKey, targetDay: number, settings = challengeSettings) {
     return getTasks(key, targetDay)
@@ -161,10 +245,6 @@ export default function HuixuApp() {
 
   function prepareRoute(key: RouteKey) {
     setPendingRoute(key);
-    if (key === "7") {
-      startRoute(key);
-      return;
-    }
     setScreen("setup");
   }
 
@@ -201,10 +281,34 @@ export default function HuixuApp() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `回序备份-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = `回序备份-${new Date().toISOString().slice(0, 10)}.huixu`;
     anchor.click();
     URL.revokeObjectURL(url);
     showToast("备份文件已生成");
+  }
+
+  function exportMarkdown() {
+    const lines = [
+      `# 回序 · ${currentRoute.name}`,
+      "",
+      `开始时间：${startedAt ? new Date(startedAt).toLocaleString("zh-CN") : "尚未开始"}`,
+      `当前进度：DAY ${day} / ${currentRoute.days}`,
+      "",
+      ...history.flatMap((record) => [
+        `## ${record.date} · DAY ${String(record.day).padStart(2, "0")} · ${record.status}`,
+        ...((record.tasks ?? getTasks(route, record.day)).map((task) => `- ${record.doneIds.includes(task.id) ? "已完成" : "未完成"}｜${task.name}${record.taskNotes?.[task.id] ? `：${record.taskNotes[task.id]}` : ""}`)),
+        record.note ? `\n> ${record.note}` : "",
+        "",
+      ]),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `回序记录-${new Date().toISOString().slice(0, 10)}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast("阅读导出已生成");
   }
 
   function restoreBackup(file?: File) {
@@ -213,24 +317,49 @@ export default function HuixuApp() {
       try {
         const saved = JSON.parse(text);
         if (!saved.route || !saved.checkins || !Array.isArray(saved.history)) throw new Error();
-        localStorage.setItem(storageKey, JSON.stringify(saved));
-        window.location.reload();
+        const mode = window.prompt(`备份包含 ${saved.history.length} 条当前记录、${saved.archives?.length ?? 0} 轮归档。\n输入“合并”保留本机归档，输入“替换”使用备份覆盖。`, "合并");
+        if (mode !== "合并" && mode !== "替换") return;
+        const restored = mode === "合并"
+          ? { ...saved, archives: [...(saved.archives ?? []), ...archives.filter((local) => !(saved.archives ?? []).some((remote: ChallengeArchive) => remote.id === local.id))] }
+          : saved;
+        localStorage.setItem(storageKey, JSON.stringify(restored));
+        void writeIndexedState(restored).then(() => window.location.reload());
       } catch {
         showToast("这不是有效的回序备份");
       }
     });
   }
 
+  function archiveCurrent(status: Lifecycle) {
+    if (!challengeId || (!startedAt && history.length === 0)) return;
+    setArchives((items) => [{
+      id: challengeId,
+      route,
+      status,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      history,
+      settings: challengeSettings,
+    }, ...items.filter((item) => item.id !== challengeId)]);
+  }
+
   function startRoute(key: RouteKey) {
+    if (history.length || startedAt) archiveCurrent(lifecycle);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const scheduled = startChoice === "tomorrow" ? tomorrow.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
     setRoute(key);
+    setChallengeId(`hx-${Date.now()}-${key}`);
+    setScheduledDate(scheduled);
     setDay(1);
     setCheckins(configuredTasks(key, 1).map((item) => ({ ...item, done: false })));
     setNote("");
     setTaskNotes({});
+    setSkippedIds([]);
     setSettled(false);
-    setLifecycle("active");
+    setLifecycle(startChoice === "tomorrow" ? "preparing" : "active");
     setHistory([]);
-    setStartedAt(new Date().toISOString());
+    setStartedAt(startChoice === "today" ? new Date().toISOString() : "");
     setTab("today");
     setScreen("app");
   }
@@ -248,10 +377,19 @@ export default function HuixuApp() {
         return item;
       });
     });
+    setSkippedIds((items) => items.filter((item) => item !== id));
+  }
+
+  function markIncomplete(id: string) {
+    if (settled || lifecycle !== "active") return;
+    setCheckins((items) => items.map((item) => item.id === id ? { ...item, done: false } : item));
+    setSkippedIds((items) => [...new Set([...items, id])]);
+    setDetailTask(null);
   }
 
   function resetDemo() {
     localStorage.removeItem(storageKey);
+    void clearIndexedState();
     setScreen("welcome");
     setTab("today");
     setRoute("21");
@@ -259,6 +397,7 @@ export default function HuixuApp() {
     setCheckins(getTasks("21", 8).map((task, index) => ({ ...task, done: index < 2 })));
     setNote("");
     setTaskNotes({});
+    setSkippedIds([]);
     setSettled(false);
     setLifecycle("active");
     setHistory([]);
@@ -270,6 +409,9 @@ export default function HuixuApp() {
       showToast(route === "7" ? "请先写下你的回序卡" : "请先写下你的生活节奏卡");
       return;
     }
+    const unanswered = checkins.filter((item) => !item.done && !skippedIds.includes(item.id));
+    if (unanswered.length && !window.confirm(`还有 ${unanswered.length} 项没有选择。继续结算会将它们记录为“今天未完成”，是否继续？`)) return;
+    const finalSkipped = [...new Set([...skippedIds, ...unanswered.map((item) => item.id)])];
     const result = getDayStatus(route, checkins.filter((item) => item.done).map((item) => item.id), day);
     const record: DailyRecord = {
       day,
@@ -278,6 +420,7 @@ export default function HuixuApp() {
       statusKey: result.key,
       counted: result.counted,
       doneIds: checkins.filter((item) => item.done).map((item) => item.id),
+      skippedIds: finalSkipped,
       note,
       stage: getStageLabel(route, day),
       taskNotes,
@@ -286,11 +429,13 @@ export default function HuixuApp() {
     };
     setHistory((records) => [...records.filter((item) => item.day !== day), record].sort((a, b) => a.day - b.day));
     setSettled(true);
+    setUndoUntil(Date.now() + 10 * 60 * 1000);
   }
 
   function advanceDay() {
     if (day >= currentRoute.days) {
       setLifecycle("finished");
+      archiveCurrent("finished");
       setTab("progress");
       return;
     }
@@ -299,13 +444,38 @@ export default function HuixuApp() {
     setCheckins(configuredTasks(route, next).map((item) => ({ ...item, done: false })));
     setNote("");
     setTaskNotes({});
+    setSkippedIds([]);
     setSettled(false);
     setTab("today");
   }
 
   function undoSettlement() {
+    if (undoUntil <= Date.now()) return;
     setHistory((records) => records.filter((item) => item.day !== day));
     setSettled(false);
+    setUndoUntil(0);
+  }
+
+  function beginPreparedChallenge() {
+    setLifecycle("active");
+    setStartedAt(new Date().toISOString());
+    setScheduledDate(new Date().toISOString().slice(0, 10));
+  }
+
+  function endChallengeEarly() {
+    archiveCurrent("ended");
+    setLifecycle("ended");
+    setEndingOpen(false);
+    setTab("progress");
+  }
+
+  function addSupplement(record: DailyRecord) {
+    if (!supplementText.trim()) return;
+    const stamp = new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date());
+    setHistory((items) => items.map((item) => item.day === record.day ? { ...item, note: `${item.note}${item.note ? "\n\n" : ""}后来补记（${stamp}）：${supplementText.trim()}` } : item));
+    setDetailRecord((current) => current ? { ...current, note: `${current.note}${current.note ? "\n\n" : ""}后来补记（${stamp}）：${supplementText.trim()}` } : current);
+    setSupplementText("");
+    showToast("补记已保存，原结果没有改变");
   }
 
   if (!hydrated) {
@@ -443,6 +613,13 @@ export default function HuixuApp() {
             <h2>{selected.name}</h2>
             <p>{selected.description}</p>
           </section>
+          {pendingRoute !== "7" && <div className={styles.setupGroup}>
+            <div className={styles.setupTitle}><span>什么时候开始？</span><small>只生成正式开始后的挑战日</small></div>
+            <div className={styles.segmented}>
+              <button className={startChoice === "today" ? styles.segmentActive : ""} onClick={() => setStartChoice("today")}>今天</button>
+              <button className={startChoice === "tomorrow" ? styles.segmentActive : ""} onClick={() => setStartChoice("tomorrow")}>明天</button>
+            </div>
+          </div>}
           <div className={styles.setupGroup}>
             <div className={styles.setupTitle}><span>你的起床范围</span><small>保持一小时，不要求越早越好</small></div>
             <div className={styles.wakeRange}>
@@ -465,7 +642,7 @@ export default function HuixuApp() {
             </div>
           )}
           <div className={styles.setupActions}>
-            <button className={styles.primaryButton} onClick={() => startRoute(pendingRoute)}>今天开始挑战</button>
+            <button className={styles.primaryButton} onClick={() => startRoute(pendingRoute)}>{startChoice === "today" ? "今天开始挑战" : "准备好，明天开始"}</button>
             <p>设置会保存在这台设备上，之后可以调整。</p>
           </div>
         </section>
@@ -486,10 +663,19 @@ export default function HuixuApp() {
               <button className={styles.sunButton} aria-label="提醒设置" onClick={() => setSettingsOpen(true)}>☼</button>
             </header>
 
-            {lifecycle === "finished" ? (
+            {lifecycle === "preparing" ? (
+              <section className={styles.pausePanel}>
+                <BrandOrbit compact />
+                <span>挑战准备中</span>
+                <h2>{scheduledDate} 开始</h2>
+                <p>第一天的内容已经准备好，正式开始前不会生成挑战记录。</p>
+                <button className={styles.primaryButton} onClick={beginPreparedChallenge}>现在开始 DAY 01</button>
+                <button className={styles.textButton} onClick={() => setScreen("routes")}>重新选择路线</button>
+              </section>
+            ) : lifecycle === "finished" || lifecycle === "ended" ? (
               <section className={styles.finishPanel}>
                 <div className={styles.finishHalo}><BrandOrbit compact /></div>
-                <span className={styles.statusPill}>{challengePassed ? "完成本轮挑战" : "本轮挑战已结束"}</span>
+                <span className={styles.statusPill}>{lifecycle === "ended" ? "已提前结束" : challengePassed ? "完成本轮挑战" : "本轮挑战已结束"}</span>
                 <h2>{challengePassed ? "你把生活，带回了自己的手里。" : "结果没有被美化，但走过的路都在。"}</h2>
                 <p>{challengePassed ? `${currentRoute.days} 天不是终点，而是一套可以再次回来的秩序。` : `这轮没有达到完成条件，${currentRoute.days} 天的全部记录仍会保留。`}</p>
                 <div className={styles.finishStats}>
@@ -531,7 +717,9 @@ export default function HuixuApp() {
                 <button className={styles.primaryButton} onClick={advanceDay}>
                   {day >= currentRoute.days ? "完成这轮挑战" : `进入 DAY ${String(day + 1).padStart(2, "0")}`}
                 </button>
-                <button className={styles.textButton} onClick={undoSettlement}>10分钟内撤销结算</button>
+                <button className={styles.textButton} onClick={undoSettlement} disabled={undoSeconds === 0}>
+                  {undoSeconds > 0 ? `${Math.floor(undoSeconds / 60)}:${String(undoSeconds % 60).padStart(2, "0")} 内可撤销结算` : "今日结果已锁定"}
+                </button>
               </section>
             ) : (
               <>
@@ -547,7 +735,7 @@ export default function HuixuApp() {
                   {checkins.map((item) => (
                     <button
                       key={item.id}
-                      className={`${styles.checkinPanel} ${styles[item.tone]} ${item.done ? styles.checked : ""}`}
+                      className={`${styles.checkinPanel} ${styles[item.tone]} ${item.done ? styles.checked : ""} ${skippedIds.includes(item.id) ? styles.skipped : ""}`}
                       onClick={() => toggleCheckin(item.id)}
                       aria-pressed={item.done}
                     >
@@ -556,7 +744,7 @@ export default function HuixuApp() {
                         <b>{item.name}</b>
                         <small>{item.detail}</small>
                       </span>
-                      <span className={styles.checkCircle}>{item.done ? "✓" : ""}</span>
+                      <span className={styles.checkCircle}>{item.done ? "✓" : skippedIds.includes(item.id) ? "—" : ""}</span>
                       <span
                         className={styles.infoButton}
                         role="button"
@@ -618,7 +806,7 @@ export default function HuixuApp() {
             </div>
             <div className={styles.statGrid}>
               <article><span>☼</span><p>{route === "7" ? "完成日" : route === "21" ? "稳定日" : "累计达标"}</p><strong>{countedDays} <small>/ {route === "7" ? 5 : route === "21" ? 15 : 40}</small></strong></article>
-              <article><span>◌</span><p>最长连续</p><strong>{longestStreak} <small>天</small></strong></article>
+              <article><span>◌</span><p>{route === "21" ? "参与轮换组" : "最长连续"}</p><strong>{route === "21" ? participatedGroups : longestStreak} <small>{route === "21" ? "/ 5组" : "天"}</small></strong></article>
             </div>
             {route === "50" && (
               <div className={styles.routeStats}>
@@ -652,8 +840,21 @@ export default function HuixuApp() {
                 {recordQuery && <button onClick={() => setRecordQuery("")}>×</button>}
               </label>
             )}
-            <div className={styles.recordMonth}><span>‹</span><b>2026年7月</b><span>›</span></div>
-            <div className={styles.recordTimeline}>
+            <div className={styles.recordControls}>
+              <div className={styles.segmented}><button className={recordMode === "timeline" ? styles.segmentActive : ""} onClick={() => setRecordMode("timeline")}>时间线</button><button className={recordMode === "calendar" ? styles.segmentActive : ""} onClick={() => setRecordMode("calendar")}>日历</button></div>
+              <select value={recordFilter} onChange={(event) => setRecordFilter(event.target.value as typeof recordFilter)} aria-label="筛选记录">
+                <option value="all">全部状态</option><option value="counted">已达标</option><option value="not-counted">未达标／未记录</option>
+              </select>
+            </div>
+            <div className={styles.recordMonth}><span>‹</span><b>{new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(new Date())}</b><span>›</span></div>
+            {recordMode === "calendar" ? (
+              <div className={styles.recordCalendar}>
+                {Array.from({ length: currentRoute.days }, (_, index) => {
+                  const record = filteredHistory.find((item) => item.day === index + 1);
+                  return <button key={index} className={record?.counted ? styles.calendarDone : record ? styles.calendarPartial : ""} disabled={!record} onClick={() => record && setDetailRecord(record)}><small>DAY</small>{index + 1}</button>;
+                })}
+              </div>
+            ) : <div className={styles.recordTimeline}>
               {filteredHistory.length === 0 && <div className={styles.emptyState}>{history.length ? "没有找到相关记录。" : "第一条记录会在你完成今日结算后出现在这里。"}</div>}
               {[...filteredHistory].reverse().map((record) => (
                 <article key={record.day} className={styles.recordItem} onClick={() => setDetailRecord(record)}>
@@ -666,7 +867,7 @@ export default function HuixuApp() {
                   </div>
                 </article>
               ))}
-            </div>
+            </div>}
           </div>
         )}
 
@@ -680,15 +881,25 @@ export default function HuixuApp() {
             <div className={styles.settingsGroup}>
               <button onClick={() => setSettingsOpen(true)}><span>◴</span><div><b>提醒与时间设置</b><small>{reminder.enabled ? `${reminder.morning} · ${reminder.evening}` : "当前未开启"}</small></div></button>
               {lifecycle !== "finished" && (
-                <button onClick={() => setLifecycle(lifecycle === "paused" ? "active" : "paused")}>
+                <button onClick={() => {
+                  if (lifecycle === "active" && !settled && (completed > 0 || note.trim() || Object.keys(taskNotes).length)) {
+                    showToast("今天已有内容，请先完成今日记录再暂停");
+                    setTab("today");
+                    return;
+                  }
+                  setLifecycle(lifecycle === "paused" ? "active" : "paused");
+                }}>
                   <span>{lifecycle === "paused" ? "▶" : "Ⅱ"}</span>
                   <div><b>{lifecycle === "paused" ? "恢复挑战" : "暂停挑战"}</b><small>{lifecycle === "paused" ? "从当前挑战日继续" : "暂停期间不生成新的挑战日"}</small></div>
                 </button>
               )}
               <button onClick={exportBackup}><span>⇩</span><div><b>导出完整备份</b><small>生成可恢复的本地文件</small></div></button>
+              <button onClick={exportMarkdown}><span>≡</span><div><b>导出阅读记录</b><small>生成可查看的Markdown文件</small></div></button>
               <button onClick={() => importRef.current?.click()}><span>⇧</span><div><b>从备份恢复</b><small>选择此前导出的回序文件</small></div></button>
-              <input ref={importRef} className={styles.hiddenInput} type="file" accept="application/json,.json" onChange={(event) => restoreBackup(event.target.files?.[0])} />
+              <input ref={importRef} className={styles.hiddenInput} type="file" accept=".huixu,application/json,.json" onChange={(event) => restoreBackup(event.target.files?.[0])} />
               <button onClick={() => setScreen("routes")}><span>⌁</span><div><b>查看全部路线</b><small>当前挑战会继续保留</small></div></button>
+              {lifecycle === "active" || lifecycle === "paused" ? <button onClick={() => setEndingOpen(true)}><span>□</span><div><b>提前结束这轮挑战</b><small>保留全部事实并生成归档</small></div></button> : null}
+              {archives.map((item) => <button key={item.id} onClick={() => setArchiveOpen(item)}><span>◇</span><div><b>{routeInfo[item.route].name} · 已归档</b><small>{item.history.length}天记录 · {new Date(item.endedAt).toLocaleDateString("zh-CN")}</small></div></button>)}
               <button onClick={resetDemo}><span>↺</span><div><b>重置产品演示</b><small>清除这台设备上的演示数据</small></div></button>
             </div>
           </div>
@@ -718,6 +929,8 @@ export default function HuixuApp() {
                   <h2>{detailTask.name}</h2>
                   <p>{detailTask.description}</p>
                   <div className={styles.sheetTip}><span>建议</span>只需要完成最低标准，不必把一次行动做成新的压力。</div>
+                  {detailTask.id === "clear-card" && <div className={styles.cardPrompts}>最近最容易打乱生活的事 · 最有帮助的行动 · 想保留的身体动作 · 注意力边界 · 下次先做什么 · 最后只保留一件事</div>}
+                  {detailTask.id === "rotation-prepare" && day === 21 && <div className={styles.cardPrompts}>适合的起床范围 · 最容易动起来的时机 · 有效的注意力边界 · 最有帮助的轮换行动 · 生活变乱时先恢复什么 · 接下来只保留一件事</div>}
                   <label className={styles.actionInput}>
                     <span>{detailTask.id === "clear-card" ? "我的回序卡" : detailTask.id === "rotation-prepare" && day === 21 ? "我的生活节奏卡" : "我实际做了什么"}</span>
                     <textarea
@@ -731,6 +944,7 @@ export default function HuixuApp() {
                     toggleCheckin(detailTask.id);
                     setDetailTask(null);
                   }}>{detailTask.done ? "取消完成" : "标记为完成"}</button>
+                  {!detailTask.done && <button className={styles.textButton} onClick={() => markIncomplete(detailTask.id)}>今天未完成</button>}
                 </>
               ) : detailRecord ? (
                 <>
@@ -740,12 +954,14 @@ export default function HuixuApp() {
                   <div className={styles.recordTaskList}>
                     {(detailRecord.tasks ?? getTasks(route, detailRecord.day)).map((task) => (
                       <div key={task.id} className={detailRecord.doneIds.includes(task.id) ? styles.recordDone : ""}>
-                        <span>{task.icon}</span><b>{task.name}<small>{detailRecord.taskNotes?.[task.id]}</small></b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : "—"}</i>
+                        <span>{task.icon}</span><b>{task.name}<small>{detailRecord.taskNotes?.[task.id]}</small></b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : detailRecord.skippedIds?.includes(task.id) ? "未完成" : "未记录"}</i>
                       </div>
                     ))}
                   </div>
                   {detailRecord.completedAt && <p className={styles.completedTime}>结算于 {new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(detailRecord.completedAt))}</p>}
                   {detailRecord.note && <blockquote>“{detailRecord.note}”</blockquote>}
+                  <label className={styles.actionInput}><span>后来补记（不会修改当天结果）</span><textarea value={supplementText} onChange={(event) => setSupplementText(event.target.value)} rows={2} placeholder="补充当时的感受或细节" /></label>
+                  <button className={styles.secondaryButton} onClick={() => addSupplement(detailRecord)}>保存补记</button>
                   <button className={styles.secondaryButton} onClick={() => setDetailRecord(null)}>关闭</button>
                 </>
               ) : null}
@@ -761,7 +977,12 @@ export default function HuixuApp() {
               <p>回序只记录你选择的时间，不会强制打断你。浏览器提醒将在后续原生版本接入。</p>
               <label className={styles.toggleRow}>
                 <span><b>启用提醒时段</b><small>保存起床与晚间收尾时间</small></span>
-                <input type="checkbox" checked={reminder.enabled} onChange={(event) => setReminder({ ...reminder, enabled: event.target.checked })} />
+                <input type="checkbox" checked={reminder.enabled} onChange={async (event) => {
+                  const enabled = event.target.checked;
+                  if (enabled && "Notification" in window && Notification.permission === "default") await Notification.requestPermission();
+                  setReminder({ ...reminder, enabled: enabled && (!("Notification" in window) || Notification.permission === "granted") });
+                  if (enabled && "Notification" in window && Notification.permission === "denied") showToast("通知权限未开启，时间设置仍会保存");
+                }} />
               </label>
               <div className={styles.timeGrid}>
                 <label><span>早晨开始</span><input type="time" value={reminder.morning} onChange={(event) => setReminder({ ...reminder, morning: event.target.value })} /></label>
@@ -785,6 +1006,28 @@ export default function HuixuApp() {
                 setSettingsOpen(false);
                 showToast("设置已保存");
               }}>保存设置</button>
+            </section>
+          </div>
+        )}
+        {endingOpen && (
+          <div className={styles.sheetBackdrop} onClick={() => setEndingOpen(false)}>
+            <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="提前结束挑战" onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} /><small>结束与归档</small><h2>提前结束这轮挑战？</h2>
+              <p>已经完成和未完成的事实都会保留，不会标记为失败，也不会从 Day 1 重置。</p>
+              <button className={styles.primaryButton} onClick={endChallengeEarly}>保留记录并结束</button>
+              <button className={styles.textButton} onClick={() => setEndingOpen(false)}>继续这轮挑战</button>
+            </section>
+          </div>
+        )}
+        {archiveOpen && (
+          <div className={styles.sheetBackdrop} onClick={() => setArchiveOpen(null)}>
+            <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="挑战归档" onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} /><small>独立挑战档案</small><h2>{routeInfo[archiveOpen.route].name}</h2>
+              <p>{archiveOpen.history.length} 天记录 · {archiveOpen.status === "finished" ? "自然结束" : archiveOpen.status === "ended" ? "提前结束" : "历史挑战"}</p>
+              <div className={styles.recordTaskList}>
+                {archiveOpen.history.map((record) => <div key={record.day} className={record.counted ? styles.recordDone : ""}><span>{record.counted ? "◆" : "◇"}</span><b>DAY {String(record.day).padStart(2, "0")}<small>{record.stage}</small></b><i>{record.status}</i></div>)}
+              </div>
+              <button className={styles.secondaryButton} onClick={() => setArchiveOpen(null)}>关闭</button>
             </section>
           </div>
         )}
@@ -823,4 +1066,48 @@ function WeekStrip() {
       ))}
     </div>
   );
+}
+
+function openHuixuDb(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = indexedDB.open("huixu-local", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("state")) request.result.createObjectStore("state");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function readIndexedState() {
+  const db = await openHuixuDb();
+  if (!db) return null;
+  return new Promise<unknown>((resolve) => {
+    const request = db.transaction("state", "readonly").objectStore("state").get("current");
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function writeIndexedState(state: unknown) {
+  const db = await openHuixuDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const transaction = db.transaction("state", "readwrite");
+    transaction.objectStore("state").put(state, "current");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+  });
+}
+
+async function clearIndexedState() {
+  const db = await openHuixuDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const transaction = db.transaction("state", "readwrite");
+    transaction.objectStore("state").delete("current");
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+  });
 }

@@ -513,6 +513,16 @@
   box-shadow: 0 6px 14px rgba(126, 143, 201, .22);
 }
 
+.checkinPanel.skipped {
+  opacity: .62;
+  filter: saturate(.55);
+}
+
+.skipped .checkCircle {
+  color: #8791a6;
+  background: rgba(255,255,255,.48);
+}
+
 .noteField {
   min-height: 52px;
   display: grid;
@@ -1110,6 +1120,16 @@
   margin: 0 0 18px;
 }
 
+.cardPrompts {
+  margin: -8px 0 16px;
+  padding: 12px;
+  border-radius: 14px;
+  color: #7e89a1;
+  background: rgba(237,241,249,.72);
+  font-size: 9px;
+  line-height: 1.7;
+}
+
 .actionInput span {
   color: #7d89a5;
   font-size: 10px;
@@ -1286,6 +1306,86 @@
   color: #9aa3b5;
   text-align: center;
   font-size: 9px;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 13px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(222,228,240,.55);
+}
+
+.segmented button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 11px;
+  color: #8993aa;
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.segmented .segmentActive {
+  color: #7183b1;
+  background: rgba(255,255,255,.88);
+  box-shadow: 0 3px 10px rgba(90,104,143,.08);
+}
+
+.recordControls {
+  display: grid;
+  grid-template-columns: 1fr 126px;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.recordControls .segmented { margin-top: 0; }
+
+.recordControls select {
+  min-height: 44px;
+  border: 1px solid rgba(145,157,184,.12);
+  outline: 0;
+  border-radius: 14px;
+  padding: 0 10px;
+  color: #7886a6;
+  background: rgba(255,255,255,.58);
+  font-size: 10px;
+}
+
+.recordCalendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.recordCalendar button {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  padding: 4px;
+  border: 1px dashed rgba(139,152,181,.22);
+  border-radius: 11px;
+  color: #9099ac;
+  background: rgba(255,255,255,.35);
+  font-size: 9px;
+}
+
+.recordCalendar button small { font-size: 6px; }
+.recordCalendar button:disabled { opacity: .45; }
+.recordCalendar .calendarDone {
+  color: #fff;
+  border-style: solid;
+  background: linear-gradient(145deg, #a7d0ef, #aa9ada);
+}
+.recordCalendar .calendarPartial {
+  color: #74819f;
+  border-style: solid;
+  background: linear-gradient(135deg, rgba(181,215,242,.65) 0 50%, rgba(244,241,250,.8) 50%);
 }
 
 .inlineWakeSetting {

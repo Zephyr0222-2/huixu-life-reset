@@ -1,0 +1,10 @@
+{
+  "name": "回序｜生活重启挑战系统",
+  "short_name": "回序",
+  "description": "从混乱，回到自己的节奏。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8FAFF",
+  "theme_color": "#F8FAFF",
+  "icons": []
+}
