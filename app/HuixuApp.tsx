@@ -25,6 +25,8 @@ type DailyRecord = {
   doneIds: string[];
   note: string;
   stage: string;
+  taskNotes?: Record<string, string>;
+  completedAt?: string;
 };
 
 const storageKey = "huixu-v1-state";
@@ -50,6 +52,7 @@ export default function HuixuApp() {
     getTasks("21", 8).map((task, index) => ({ ...task, done: index < 2 }))
   );
   const [note, setNote] = useState("");
+  const [taskNotes, setTaskNotes] = useState<Record<string, string>>({});
   const [settled, setSettled] = useState(false);
   const [lifecycle, setLifecycle] = useState<Lifecycle>("active");
   const [history, setHistory] = useState<DailyRecord[]>([]);
@@ -76,6 +79,7 @@ export default function HuixuApp() {
         setDay(saved.day ?? 8);
         setCheckins(saved.checkins ?? getTasks("21", 8).map((task, index) => ({ ...task, done: index < 2 })));
         setNote(saved.note ?? "");
+        setTaskNotes(saved.taskNotes ?? {});
         setSettled(saved.settled ?? false);
         setLifecycle(saved.lifecycle ?? "active");
         setHistory(saved.history ?? []);
@@ -91,9 +95,9 @@ export default function HuixuApp() {
     if (!hydrated) return;
     localStorage.setItem(
       storageKey,
-      JSON.stringify({ screen, route, day, checkins, note, settled, lifecycle, history, startedAt, reminder })
+      JSON.stringify({ screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder })
     );
-  }, [screen, route, day, checkins, note, settled, lifecycle, history, startedAt, reminder, hydrated]);
+  }, [screen, route, day, checkins, note, taskNotes, settled, lifecycle, history, startedAt, reminder, hydrated]);
 
   const completed = useMemo(() => checkins.filter((item) => item.done).length, [checkins]);
   const currentRoute = routeInfo[route];
@@ -112,6 +116,20 @@ export default function HuixuApp() {
     });
     return longest;
   }, [history]);
+  const optionalCounts = {
+    reading: history.filter((record) => record.doneIds.includes("long-read")).length,
+    skill: history.filter((record) => record.doneIds.includes("long-skill")).length,
+  };
+  const finalRequiredDone = route === "7"
+    ? Boolean(taskNotes["clear-card"]?.trim())
+    : route === "21"
+      ? Boolean(taskNotes["rotation-prepare"]?.trim())
+      : true;
+  const challengePassed = route === "7"
+    ? countedDays >= 5 && history.some((record) => record.day === 7 && record.doneIds.includes("clear-card") && record.taskNotes?.["clear-card"]?.trim())
+    : route === "21"
+      ? countedDays >= 15 && history.some((record) => record.day === 21 && record.doneIds.includes("rotation-prepare") && record.taskNotes?.["rotation-prepare"]?.trim())
+      : countedDays >= 40;
   const filteredHistory = history.filter((record) =>
     `${record.stage}${record.status}${record.note}`.toLowerCase().includes(recordQuery.trim().toLowerCase())
   );
@@ -164,6 +182,7 @@ export default function HuixuApp() {
     setDay(1);
     setCheckins(getTasks(key, 1).map((item) => ({ ...item, done: false })));
     setNote("");
+    setTaskNotes({});
     setSettled(false);
     setLifecycle("active");
     setHistory([]);
@@ -174,9 +193,17 @@ export default function HuixuApp() {
 
   function toggleCheckin(id: string) {
     if (settled || lifecycle !== "active") return;
-    setCheckins((items) =>
-      items.map((item) => (item.id === id ? { ...item, done: !item.done } : item))
-    );
+    setCheckins((items) => {
+      const target = items.find((item) => item.id === id);
+      const nextDone = !target?.done;
+      return items.map((item) => {
+        if (item.id === id) return { ...item, done: nextDone };
+        if (route === "7" && day === 4 && id === "clear-body" && item.id === "clear-anchor-body") {
+          return { ...item, done: nextDone || item.done };
+        }
+        return item;
+      });
+    });
   }
 
   function resetDemo() {
@@ -187,6 +214,7 @@ export default function HuixuApp() {
     setDay(8);
     setCheckins(getTasks("21", 8).map((task, index) => ({ ...task, done: index < 2 })));
     setNote("");
+    setTaskNotes({});
     setSettled(false);
     setLifecycle("active");
     setHistory([]);
@@ -194,6 +222,10 @@ export default function HuixuApp() {
   }
 
   function settleToday() {
+    if (((route === "7" && day === 7) || (route === "21" && day === 21)) && !finalRequiredDone) {
+      showToast(route === "7" ? "请先写下你的回序卡" : "请先写下你的生活节奏卡");
+      return;
+    }
     const result = getDayStatus(route, checkins.filter((item) => item.done).map((item) => item.id), day);
     const record: DailyRecord = {
       day,
@@ -204,6 +236,8 @@ export default function HuixuApp() {
       doneIds: checkins.filter((item) => item.done).map((item) => item.id),
       note,
       stage: getStageLabel(route, day),
+      taskNotes,
+      completedAt: new Date().toISOString(),
     };
     setHistory((records) => [...records.filter((item) => item.day !== day), record].sort((a, b) => a.day - b.day));
     setSettled(true);
@@ -219,6 +253,7 @@ export default function HuixuApp() {
     setDay(next);
     setCheckins(getTasks(route, next).map((item) => ({ ...item, done: false })));
     setNote("");
+    setTaskNotes({});
     setSettled(false);
     setTab("today");
   }
@@ -336,6 +371,7 @@ export default function HuixuApp() {
               <h2>{routeInfo[recommended].label}</h2>
               <p>{routeInfo[recommended].description} 这不是能力判断，只是帮你选择此刻更容易开始的坡度。</p>
               <button className={styles.primaryButton} onClick={() => startRoute(recommended)}>从这里开始</button>
+              <button className={styles.textButton} onClick={() => setScreen("routes")}>仍然查看其他路线</button>
               <button className={styles.textButton} onClick={() => { setAssessmentStep(0); setAssessmentScore([]); }}>重新测试</button>
             </section>
           )}
@@ -360,14 +396,15 @@ export default function HuixuApp() {
             {lifecycle === "finished" ? (
               <section className={styles.finishPanel}>
                 <div className={styles.finishHalo}><BrandOrbit compact /></div>
-                <span className={styles.statusPill}>本轮挑战已完成</span>
-                <h2>你把生活，带回了自己的手里。</h2>
-                <p>{currentRoute.days} 天不是终点，而是一套可以再次回来的秩序。</p>
+                <span className={styles.statusPill}>{challengePassed ? "完成本轮挑战" : "本轮挑战已结束"}</span>
+                <h2>{challengePassed ? "你把生活，带回了自己的手里。" : "结果没有被美化，但走过的路都在。"}</h2>
+                <p>{challengePassed ? `${currentRoute.days} 天不是终点，而是一套可以再次回来的秩序。` : `这轮没有达到完成条件，${currentRoute.days} 天的全部记录仍会保留。`}</p>
                 <div className={styles.finishStats}>
                   <div><strong>{countedDays}</strong><small>达标日</small></div>
                   <div><strong>{completionRate}%</strong><small>稳定率</small></div>
                   <div><strong>{longestStreak}</strong><small>最长连续</small></div>
                 </div>
+                {route === "50" && <p className={styles.optionalSummary}>阅读 {optionalCounts.reading} 次 · 技能学习 {optionalCounts.skill} 次</p>}
                 <button className={styles.primaryButton} onClick={() => setTab("records")}>回看这段旅程</button>
                 <button className={styles.textButton} onClick={() => setScreen("routes")}>选择新的路线</button>
               </section>
@@ -483,13 +520,25 @@ export default function HuixuApp() {
                 const n = index + 1;
                 const record = history.find((item) => item.day === n);
                 const state = record?.counted ? "done" : record ? "partial" : n === day ? "current" : "future";
-                return <span key={n} className={styles[state]}>{n}</span>;
+                return <button key={n} className={styles[state]} onClick={() => record && setDetailRecord(record)} disabled={!record}>{n}</button>;
               })}
             </div>
             <div className={styles.statGrid}>
               <article><span>☼</span><p>{route === "7" ? "完成日" : route === "21" ? "稳定日" : "累计达标"}</p><strong>{countedDays} <small>/ {route === "7" ? 5 : route === "21" ? 15 : 40}</small></strong></article>
               <article><span>◌</span><p>最长连续</p><strong>{longestStreak} <small>天</small></strong></article>
             </div>
+            {route === "50" && (
+              <div className={styles.routeStats}>
+                {[
+                  ["全部完成日", history.filter((item) => item.statusKey === "full").length],
+                  ["达标日", history.filter((item) => item.statusKey === "qualified").length],
+                  ["记录日", history.filter((item) => item.statusKey === "recorded").length],
+                  ["未达标日", history.filter((item) => item.statusKey === "incomplete").length],
+                  ["阅读挑战", optionalCounts.reading],
+                  ["技能学习", optionalCounts.skill],
+                ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value} 天</b></div>)}
+              </div>
+            )}
             <article className={styles.insightCard}>
               <div className={styles.insightOrb} />
               <div><small>当前阶段</small><p>{getStageLabel(route, day)} · 中断不会让已有记录归零。</p></div>
@@ -576,6 +625,15 @@ export default function HuixuApp() {
                   <h2>{detailTask.name}</h2>
                   <p>{detailTask.description}</p>
                   <div className={styles.sheetTip}><span>建议</span>只需要完成最低标准，不必把一次行动做成新的压力。</div>
+                  <label className={styles.actionInput}>
+                    <span>{detailTask.id === "clear-card" ? "我的回序卡" : detailTask.id === "rotation-prepare" && day === 21 ? "我的生活节奏卡" : "我实际做了什么"}</span>
+                    <textarea
+                      value={taskNotes[detailTask.id] ?? ""}
+                      onChange={(event) => setTaskNotes({ ...taskNotes, [detailTask.id]: event.target.value })}
+                      placeholder={detailTask.id === "clear-card" ? "写下最容易打乱你的事、最有帮助的行动，以及下次先做什么……" : "可以记录时间、内容或实际感受"}
+                      rows={3}
+                    />
+                  </label>
                   <button className={styles.primaryButton} onClick={() => {
                     toggleCheckin(detailTask.id);
                     setDetailTask(null);
@@ -589,10 +647,11 @@ export default function HuixuApp() {
                   <div className={styles.recordTaskList}>
                     {getTasks(route, detailRecord.day).map((task) => (
                       <div key={task.id} className={detailRecord.doneIds.includes(task.id) ? styles.recordDone : ""}>
-                        <span>{task.icon}</span><b>{task.name}</b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : "—"}</i>
+                        <span>{task.icon}</span><b>{task.name}<small>{detailRecord.taskNotes?.[task.id]}</small></b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : "—"}</i>
                       </div>
                     ))}
                   </div>
+                  {detailRecord.completedAt && <p className={styles.completedTime}>结算于 {new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(detailRecord.completedAt))}</p>}
                   {detailRecord.note && <blockquote>“{detailRecord.note}”</blockquote>}
                   <button className={styles.secondaryButton} onClick={() => setDetailRecord(null)}>关闭</button>
                 </>

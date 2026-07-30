@@ -663,15 +663,20 @@
   margin-bottom: 24px;
 }
 
-.dayGrid span {
+.dayGrid button {
   aspect-ratio: 1;
   display: grid;
   place-items: center;
+  padding: 0;
   border-radius: 12px;
   font-size: 9px;
   color: #8e98ad;
   border: 1px dashed rgba(132, 149, 184, .28);
+  background: transparent;
+  cursor: pointer;
 }
+
+.dayGrid button:disabled { cursor: default; }
 
 .dayGrid .done {
   color: #fff;
@@ -1055,8 +1060,16 @@
 }
 
 .recordTaskList b {
+  display: grid;
+  gap: 3px;
   font-size: 11px;
   font-weight: 530;
+}
+
+.recordTaskList b small {
+  color: #8e98aa;
+  font-size: 9px;
+  font-weight: 400;
 }
 
 .recordTaskList i {
@@ -1088,6 +1101,69 @@
   color: #7586b1;
   background: rgba(255,255,255,.72);
   cursor: pointer;
+}
+
+.actionInput {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 18px;
+}
+
+.actionInput span {
+  color: #7d89a5;
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.actionInput textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid rgba(137,151,183,.15);
+  outline: 0;
+  border-radius: 16px;
+  padding: 12px;
+  color: var(--ink);
+  background: rgba(255,255,255,.7);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.completedTime {
+  margin: -6px 0 16px !important;
+  color: #9aa3b5 !important;
+  font-size: 9px !important;
+}
+
+.optionalSummary {
+  margin: -10px 0 18px !important;
+  color: #7886a7 !important;
+}
+
+.routeStats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.routeStats div {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-radius: 15px;
+  color: #8993a9;
+  background: rgba(255,255,255,.52);
+  border: 1px solid rgba(145,157,184,.1);
+  font-size: 9px;
+}
+
+.routeStats b {
+  color: #7586b0;
+  font-size: 10px;
+  font-weight: 560;
 }
 
 .assessmentShell {
