@@ -146,8 +146,18 @@ export default function HuixuApp() {
   }
 
   function assessmentRoute(): RouteKey {
-    const total = assessmentScore.reduce((sum, value) => sum + value, 0);
-    return total <= 4 ? "50" : total <= 8 ? "21" : "7";
+    const burden = assessmentScore.slice(0, 5).reduce((sum, value) => sum + value, 0);
+    const stableBase = assessmentScore[5] ?? 1;
+    const capacity = assessmentScore[6] ?? 1;
+    const preference = assessmentScore[7];
+
+    if (capacity === 2) return "7";
+    if (capacity === 1) return burden >= 7 || stableBase === 2 ? "7" : "21";
+    if (burden >= 8) return "7";
+    if (burden <= 3 && stableBase === 0) return preference === 0 ? "21" : "50";
+    if (preference === 2 && burden <= 5 && stableBase !== 2) return "50";
+    if (preference === 0 && burden >= 5) return "7";
+    return "21";
   }
 
   function exportBackup() {
@@ -685,10 +695,14 @@ export default function HuixuApp() {
 }
 
 const assessmentQuestions = [
-  { title: "最近，你的生活有多乱？", hint: "选择最接近最近一周的状态。", answers: ["只是有点散，需要重新整理", "作息和行动经常失控", "已经很难开始任何事情"] },
-  { title: "你现在能稳定投入多少精力？", hint: "不用选择理想状态，只看此刻。", answers: ["每天能留出一段完整时间", "能完成几件固定小事", "只能从一件很小的事开始"] },
-  { title: "面对连续挑战，你更担心什么？", hint: "答案不会影响评价，只用于匹配坡度。", answers: ["内容太少，看不到变化", "坚持几天后中断", "第一天就压力太大"] },
-  { title: "你希望这次改变带来什么？", hint: "选一个现在最重要的方向。", answers: ["建立长期而完整的生活结构", "先拥有一套稳定日常", "尽快清理混乱、重新启动"] },
+  { title: "最近两周，你的作息变化大吗？", hint: "这里不评价早晚，只看是否有相对稳定的范围。", answers: ["大多数时候比较稳定", "偶尔会相差几个小时", "经常昼夜颠倒或没有规律"] },
+  { title: "你会因为混乱或疲惫，忽略基本照料吗？", hint: "例如吃饭、洗漱、更换衣物或补充生活用品。", answers: ["很少，基本能够照顾好", "有时会拖延或随便应付", "经常顾不上这些事情"] },
+  { title: "常用空间现在处于什么状态？", hint: "想想床边、桌面、衣物区或经常使用的角落。", answers: ["基本可用，不太影响生活", "有些乱，但还能使用", "已经影响使用或让我持续烦躁"] },
+  { title: "你会无意识地刷信息流多久？", hint: "包括短视频、推荐页、新闻流和无目的浏览。", answers: ["能够主动停下来", "经常比原计划刷得更久", "常常停不下来并挤占睡眠或正事"] },
+  { title: "近期的小事和积压事项多吗？", hint: "看它们是否持续占据注意力，而不是事情本身大小。", answers: ["不多，通常能及时处理", "有一些，经常想起却没处理", "很多，已经不知道先做哪件"] },
+  { title: "你现在还保有几个稳定锚点？", hint: "例如相近的起床时间、固定活动或晚间边界。", answers: ["至少有两个比较稳定", "大概还能保持一个", "几乎没有固定节奏"] },
+  { title: "你每天能为挑战投入多少行动？", hint: "按当前真实精力选择，不按理想中的自己。", answers: ["能稳定完成5—6项行动", "能完成2—3项小行动", "目前只能承受1件小事"] },
+  { title: "你此刻最希望先得到什么？", hint: "这一题用于修正推荐方向，不会限制你的选择。", answers: ["清理眼前阻力，重新启动", "建立几个可重复的节奏", "长期实践一套完整规则", "还不确定，希望系统判断"] },
 ];
 
 function WeekStrip() {

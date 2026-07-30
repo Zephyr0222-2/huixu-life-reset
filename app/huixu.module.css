@@ -2,6 +2,7 @@
 .appStage,
 .loading {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 28px 18px;
@@ -15,7 +16,7 @@
 .welcome {
   position: relative;
   width: min(100%, 430px);
-  min-height: min(880px, calc(100vh - 36px));
+  min-height: min(880px, calc(100dvh - 36px));
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.88);
   border-radius: 44px;
@@ -334,7 +335,7 @@
 }
 
 .screenContent {
-  min-height: calc(min(880px, 100vh - 36px) - 76px);
+  min-height: calc(min(880px, 100dvh - 36px) - 76px);
   padding: 32px 24px 104px;
   overflow-y: auto;
 }
@@ -1422,6 +1423,7 @@
   .welcome {
     width: 100%;
     min-height: 100vh;
+    min-height: 100dvh;
     border: 0;
     border-radius: 0;
     box-shadow: none;
@@ -1429,13 +1431,61 @@
 
   .screenContent {
     min-height: 100vh;
-    padding-top: max(28px, env(safe-area-inset-top));
+    min-height: 100dvh;
+    padding-top: max(28px, calc(env(safe-area-inset-top) + 12px));
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
   }
 
   .tabBar {
-    bottom: max(8px, env(safe-area-inset-bottom));
+    bottom: max(8px, calc(env(safe-area-inset-bottom) + 4px));
   }
+
+  .routeShell,
+  .assessmentShell {
+    padding-top: max(24px, calc(env(safe-area-inset-top) + 10px));
+    padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 18px));
+  }
+}
+
+@media (max-width: 350px) {
+  .screenContent {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .checkinPanel {
+    grid-template-columns: 40px minmax(0, 1fr) 30px 26px;
+    gap: 7px;
+    padding: 9px 10px;
+  }
+
+  .checkinIcon {
+    width: 38px;
+    height: 38px;
+    border-radius: 14px;
+    font-size: 19px;
+  }
+
+  .checkinText b { font-size: 13px; }
+  .checkinText small { font-size: 9px; }
+  .checkCircle { width: 28px; height: 28px; }
+  .infoButton { width: 26px; height: 30px; }
+  .sectionTitle p { max-width: 120px; text-align: right; line-height: 1.35; }
+  .tabBar { left: 8px; right: 8px; }
+  .assessmentShell { padding-left: 18px; padding-right: 18px; }
+  .assessmentCopy h1 { font-size: 25px; }
+  .answerList { margin-top: 30px; }
+  .answerList button { padding-left: 12px; padding-right: 12px; }
+}
+
+@supports (-webkit-touch-callout: none) {
+  textarea,
+  input { font-size: 16px; }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 @media (prefers-reduced-motion: reduce) {
