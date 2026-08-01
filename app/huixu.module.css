@@ -245,6 +245,16 @@
   gap: 14px;
 }
 
+.routeWarning {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  color: #77839f;
+  background: rgba(236, 241, 252, .78);
+  font-size: 10px;
+  line-height: 1.65;
+}
+
 .routeCard {
   min-height: 174px;
   position: relative;
@@ -297,6 +307,50 @@
 .routeMeta small {
   color: #929ab0;
   font-size: 9px;
+}
+
+.routeMeta em {
+  display: block;
+  margin-top: 7px;
+  color: #687795;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1.55;
+}
+
+.routeDetails {
+  margin-top: 12px;
+  color: #74819d;
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.routeDetails summary {
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 10px;
+  color: #6f82b0;
+  background: rgba(255,255,255,.62);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.routeDetails section {
+  margin-top: 11px;
+}
+
+.routeDetails b {
+  color: #65738f;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.routeDetails ul,
+.routeDetails ol {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 18px;
 }
 
 .routeCard > button {
@@ -411,11 +465,13 @@
   display: flex;
   align-items: baseline;
   gap: 9px;
+  flex-shrink: 0;
 }
 
 .sectionTitle span {
   font-size: 15px;
   font-weight: 620;
+  white-space: nowrap;
 }
 
 .sectionTitle small {
@@ -427,6 +483,9 @@
   font-size: 8px;
   color: #9da5b5;
   margin: 0;
+  max-width: 205px;
+  text-align: right;
+  line-height: 1.45;
 }
 
 .checkinStack {
@@ -518,6 +577,53 @@
   filter: saturate(.55);
 }
 
+.compactChallenge {
+  min-height: 58px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  opacity: .88;
+  box-shadow: 0 7px 18px rgba(92, 107, 148, .05);
+}
+
+.compactChallenge .checkinIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  font-size: 17px;
+}
+
+.subChallengeLabel {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 2px 10px;
+}
+
+.subChallengeLabel span { color: #68738e; font-size: 12px; font-weight: 590; }
+.subChallengeLabel small { color: var(--faint); font-size: 8px; text-align: right; }
+
+.optionalChallenges { margin-top: 18px; }
+.optionalToggle {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  border: 1px solid rgba(145,157,184,.13);
+  border-radius: 19px;
+  color: var(--ink);
+  background: rgba(255,255,255,.45);
+  text-align: left;
+}
+.optionalToggle span { display: grid; gap: 4px; }
+.optionalToggle b { font-size: 12px; font-weight: 580; }
+.optionalToggle small { color: var(--muted); font-size: 9px; }
+.optionalToggle i { color: #8995ad; font-size: 18px; font-style: normal; }
+.optionalChallenges .checkinStack { margin-top: 10px; }
+.reflectionField { margin-top: 18px; }
+
 .skipped .checkCircle {
   color: #8791a6;
   background: rgba(255,255,255,.48);
@@ -578,8 +684,12 @@
   cursor: pointer;
 }
 
-.tabBar button span { font-size: 20px; line-height: 1; }
+.tabBar button > span { font-size: 20px; line-height: 1; }
 .tabBar .activeTab { color: #748cd0; }
+
+.navIcon { width: 24px; height: 24px; display: grid; place-items: center; }
+.navIcon svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.activeTab .navIcon { filter: drop-shadow(0 4px 6px rgba(116, 140, 208, .22)); }
 
 .settlement {
   text-align: center;
@@ -665,7 +775,7 @@
   letter-spacing: -.04em;
 }
 .progressHero strong span { color: #9da6b8; font-size: 22px; }
-.progressHero small { font-size: 9px; }
+.progressHero small { display: block; max-width: 340px; font-size: 10px; line-height: 1.65; }
 
 .dayGrid {
   display: grid;
@@ -889,6 +999,17 @@
   font-size: 11px;
   line-height: 1.7;
 }
+
+.historyIntro { margin: -4px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.historyList { display: grid; gap: 12px; }
+.historyList > button { width: 100%; min-height: 96px; display: grid; grid-template-columns: 44px 1fr 20px; align-items: center; gap: 10px; padding: 15px; border: 1px solid rgba(145,157,184,.12); border-radius: 21px; color: var(--ink); background: rgba(255,255,255,.55); text-align: left; }
+.historyList > button > span { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 14px; color: #7895ce; background: linear-gradient(145deg, rgba(185,217,245,.68), rgba(213,201,242,.62)); }
+.historyList div { display: grid; gap: 4px; }
+.historyList small, .historyList p { margin: 0; color: var(--muted); font-size: 9px; }
+.historyList b { font-size: 14px; font-weight: 590; }
+.historyList > button > i { color: #9ca7bb; font-size: 22px; font-style: normal; }
+.archiveDays button { width: 100%; min-height: 52px; display: grid; grid-template-columns: 30px 1fr auto; align-items: center; border: 0; border-bottom: 1px solid rgba(145,157,184,.12); color: var(--ink); background: transparent; text-align: left; }
+.archiveBack { margin: 0 0 12px; padding: 0; border: 0; color: #788dc2; background: transparent; }
 
 .recordItem {
   cursor: pointer;
@@ -1653,14 +1774,20 @@
 }
 
 @media (max-width: 520px) {
+  html,
+  body { min-height: 100%; overscroll-behavior-y: none; }
+
   .centerStage,
   .appStage {
+    height: 100dvh;
     padding: 0;
+    overflow: hidden;
   }
 
   .phoneShell,
   .welcome {
     width: 100%;
+    height: 100dvh;
     min-height: 100vh;
     min-height: 100dvh;
     border: 0;
@@ -1669,8 +1796,11 @@
   }
 
   .screenContent {
-    min-height: 100vh;
-    min-height: 100dvh;
+    height: 100dvh;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
     padding-top: max(28px, calc(env(safe-area-inset-top) + 12px));
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
   }

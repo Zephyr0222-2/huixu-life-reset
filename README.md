@@ -1,98 +1,70 @@
-# vinext-starter
+# 回序
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+从混乱，回到自己的节奏。
 
-## Prerequisites
+回序是一套无需账号、本地优先的渐进式生活挑战系统。它通过 7 日清场、21 日稳定和 50 日挑战，帮助用户从现实阻力、生活节律和长期生活规则三个层次，逐步找回可持续的日常节奏。
 
-- Node.js `>=22.13.0`
+## 产品原则
 
-## Quick Start
+- 严格记录事实，温柔对待结果
+- 中断不会让已有记录归零
+- 基础生活优先，不制造新的完成压力
+- 无需注册或登录
+- 每日记录、挑战内容和时间设置默认只保存在本机
+- 支持完整备份、恢复与 Markdown 导出
+
+## 三条挑战路线
+
+### 7 日清场
+
+每天清理一个现实阻力，并保留身体和注意力两个小锚点。完成至少 5 个清场挑战，并在第 7 天留下回序卡，即完成挑战。
+
+### 21 日稳定
+
+每天完成固定起床、主动活动、收回注意力三项固定挑战，并参与一项轮换附加挑战。21 天内获得至少 15 个稳定日，并完成至少 15 次附加挑战，即完成挑战。
+
+### 50 日挑战
+
+每天完成稳定起床、晨间仪式、主动活动、好好吃饭、每日记录与反思五项基础挑战，并可自由选择五项成长挑战。50 天内累计至少 40 个达标日，即完成挑战；每天完成至少 4 项基础挑战即可成为达标日。
+
+## 数据与隐私
+
+产品不设置账号系统。挑战状态保存在浏览器的 IndexedDB，并保留 localStorage 兼容层。
+
+匿名统计为可选功能，首次进入时由用户决定是否开启。统计设计只允许上传页面访问、功能使用和匿名结果类型，不上传每日文字、任务实际内容、起床范围、提醒时间或备份文件。
+
+## 技术栈
+
+- React 19
+- TypeScript
+- Vinext / Vite
+- CSS Modules
+- IndexedDB / localStorage
+- Service Worker / Web App Manifest
+
+## 本地开发
+
+要求 Node.js 22.13 或更高版本。
 
 ```bash
 npm install
 npm run dev
+```
+
+生产构建：
+
+```bash
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+## 项目结构
 
-## Included Shape
+- `app/HuixuApp.tsx`：产品状态、生命周期与主要交互
+- `app/challengeData.ts`：三条路线、任务文案、规则与每日鼓励
+- `app/huixu.module.css`：视觉与移动端适配
+- `public/sw.js`：离线缓存
+- `public/manifest.webmanifest`：PWA 配置
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## 开源说明
 
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+回序计划作为免费、非商业化的开源项目持续迭代。欢迎通过 Issue 提交真实使用反馈、规则讨论和体验问题。
