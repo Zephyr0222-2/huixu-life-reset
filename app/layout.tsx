@@ -24,9 +24,9 @@ export const metadata: Metadata = {
     images: ["/og.png"],
   },
   icons: {
-    icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
-    shortcut: "/icon-192.png",
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    icon: [{ url: "/icon-v2-192.png", sizes: "192x192", type: "image/png" }],
+    shortcut: "/icon-v2-192.png",
+    apple: [{ url: "/apple-touch-icon-v2.png", sizes: "180x180", type: "image/png" }],
   },
 };
 

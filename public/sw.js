@@ -1,4 +1,4 @@
-const CACHE = "huixu-shell-v2";
+const CACHE = "huixu-shell-v3";
 const SHELL = ["/", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
