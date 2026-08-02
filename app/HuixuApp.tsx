@@ -19,6 +19,10 @@ type Tab = "today" | "progress" | "records" | "history" | "me";
 
 type Checkin = TaskDefinition & { done: boolean };
 type Lifecycle = "preparing" | "active" | "paused" | "finished" | "ended";
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 type DailyRecord = {
   day: number;
   date: string;
@@ -52,6 +56,11 @@ type ChallengeArchive = {
 };
 
 const storageKey = "huixu-v1-state";
+
+function localDateKey(value: string | Date) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 function BrandOrbit({ compact = false }: { compact?: boolean }) {
   return (
@@ -101,6 +110,7 @@ export default function HuixuApp() {
   const [archives, setArchives] = useState<ChallengeArchive[]>([]);
   const [recordMode, setRecordMode] = useState<"timeline" | "calendar">("timeline");
   const [recordFilter, setRecordFilter] = useState<"all" | "counted" | "not-counted">("all");
+  const [recordMonthCursor, setRecordMonthCursor] = useState(() => localDateKey(new Date()).slice(0, 7));
   const [undoUntil, setUndoUntil] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [endingOpen, setEndingOpen] = useState(false);
@@ -109,6 +119,10 @@ export default function HuixuApp() {
   const [optionalOpen, setOptionalOpen] = useState(false);
   const [challengeRulesVersion, setChallengeRulesVersion] = useState(rulesVersion);
   const [analyticsConsent, setAnalyticsConsent] = useState<"pending" | "accepted" | "declined">("pending");
+  const [analyticsPromptSeen, setAnalyticsPromptSeen] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installGuideOpen, setInstallGuideOpen] = useState(false);
+  const [appInstalled, setAppInstalled] = useState(false);
   const [routesFromApp, setRoutesFromApp] = useState(false);
   const [supplementText, setSupplementText] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
@@ -161,6 +175,7 @@ export default function HuixuApp() {
           setArchives(saved.archives ?? []);
           setChallengeRulesVersion(saved.challengeRulesVersion ?? 1);
           setAnalyticsConsent(saved.analyticsConsent ?? "pending");
+          setAnalyticsPromptSeen(saved.analyticsPromptSeen ?? false);
           setUndoUntil(crossedDay ? 0 : saved.undoUntil ?? 0);
         }
       } finally {
@@ -172,10 +187,10 @@ export default function HuixuApp() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const state = { screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, schemaVersion: 3 };
+    const state = { screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, schemaVersion: 4 };
     localStorage.setItem(storageKey, JSON.stringify(state));
     void writeIndexedState(state);
-  }, [screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, hydrated]);
+  }, [screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, hydrated]);
 
   useEffect(() => {
     if (!undoUntil || undoUntil <= Date.now()) return;
@@ -188,17 +203,39 @@ export default function HuixuApp() {
   }, []);
 
   useEffect(() => {
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    setAppInstalled(standalone);
+    const capturePrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const markInstalled = () => { setAppInstalled(true); setInstallPrompt(null); };
+    window.addEventListener("beforeinstallprompt", capturePrompt);
+    window.addEventListener("appinstalled", markInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", capturePrompt);
+      window.removeEventListener("appinstalled", markInstalled);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!reminder.enabled || lifecycle !== "active" || !("Notification" in window) || Notification.permission !== "granted") return;
-    const timers = [reminder.morning, reminder.evening].map((time, index) => {
-      const [hour, minute] = time.split(":").map(Number);
-      const target = new Date();
-      target.setHours(hour, minute, 0, 0);
-      if (target.getTime() <= Date.now()) target.setDate(target.getDate() + 1);
-      return window.setTimeout(() => new Notification(index === 0 ? "回序 · 今天" : "回序 · 晚间收尾", {
-        body: index === 0 ? "今天的挑战已经准备好，从能承受的一件事开始。" : "今天的记录还没有结束，需要时可以回来继续。",
-      }), target.getTime() - Date.now());
-    });
-    return () => timers.forEach(window.clearTimeout);
+    const notifyAtMatchingMinute = () => {
+      const current = new Date();
+      const time = `${String(current.getHours()).padStart(2, "0")}:${String(current.getMinutes()).padStart(2, "0")}`;
+      [reminder.morning, reminder.evening].forEach((target, index) => {
+        if (time !== target) return;
+        const sentKey = `huixu-reminder-${localDateKey(current)}-${index}`;
+        if (sessionStorage.getItem(sentKey)) return;
+        sessionStorage.setItem(sentKey, "1");
+        new Notification(index === 0 ? "回序 · 今天" : "回序 · 晚间收尾", {
+          body: index === 0 ? "今天的挑战已经准备好，从能承受的一件事开始。" : "今天的记录还没有结束，需要时可以回来继续。",
+        });
+      });
+    };
+    notifyAtMatchingMinute();
+    const timer = window.setInterval(notifyAtMatchingMinute, 15000);
+    return () => window.clearInterval(timer);
   }, [reminder, lifecycle]);
 
   const completed = useMemo(() => checkins.filter((item) => item.done).length, [checkins]);
@@ -236,6 +273,22 @@ export default function HuixuApp() {
     return matchesText && matchesStatus;
   });
   const undoSeconds = Math.max(0, Math.ceil((undoUntil - now) / 1000));
+  const analyticsAvailable = typeof window !== "undefined" && Boolean((window as Window & { umami?: unknown }).umami);
+  const calendarCursor = new Date(`${recordMonthCursor}-01T12:00:00`);
+  const calendarOffset = (calendarCursor.getDay() + 6) % 7;
+  const calendarDays = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 0).getDate();
+  const calendarRecords = useMemo(() => {
+    const map = new Map<string, DailyRecord>();
+    filteredHistory.forEach((record) => {
+      if (record.completedAt) map.set(localDateKey(record.completedAt), record);
+      else if (startedAt) {
+        const date = new Date(startedAt);
+        date.setDate(date.getDate() + record.day - 1);
+        map.set(localDateKey(date), record);
+      }
+    });
+    return map;
+  }, [filteredHistory, startedAt]);
 
   function configuredTasks(key: RouteKey, targetDay: number, settings = challengeSettings) {
     return getTasks(key, targetDay)
@@ -269,6 +322,30 @@ export default function HuixuApp() {
     const next = [...assessmentScore, value];
     setAssessmentScore(next);
     if (assessmentStep < assessmentQuestions.length - 1) setAssessmentStep((step) => step + 1);
+  }
+
+  function previousAssessment() {
+    if (!assessmentScore.length) return;
+    const onResult = assessmentScore.length === assessmentQuestions.length;
+    setAssessmentScore((scores) => scores.slice(0, -1));
+    setAssessmentStep((step) => Math.max(0, step - (onResult ? 0 : 1)));
+  }
+
+  async function installApp() {
+    if (appInstalled) return showToast("回序已经安装到这台设备");
+    if (!installPrompt) {
+      setInstallGuideOpen(true);
+      return;
+    }
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === "accepted") setAppInstalled(true);
+    setInstallPrompt(null);
+  }
+
+  function changeRecordMonth(offset: number) {
+    const next = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + offset, 1, 12);
+    setRecordMonthCursor(localDateKey(next).slice(0, 7));
   }
 
   function assessmentRoute(): RouteKey {
@@ -452,6 +529,7 @@ export default function HuixuApp() {
     setArchives([]);
     setChallengeRulesVersion(rulesVersion);
     setAnalyticsConsent("pending");
+    setAnalyticsPromptSeen(false);
     setRoutesFromApp(false);
   }
 
@@ -667,6 +745,7 @@ export default function HuixuApp() {
                   </button>
                 ))}
               </div>
+              {assessmentStep > 0 && <button className={styles.assessmentBack} onClick={previousAssessment}>‹ 上一题</button>}
             </>
           ) : (
             <section className={styles.assessmentResult}>
@@ -676,6 +755,7 @@ export default function HuixuApp() {
               <h2>{routeInfo[recommended].label}</h2>
               <p>{routeInfo[recommended].description} 这不是能力判断，只是帮你选择此刻更容易开始的坡度。</p>
               <button className={styles.primaryButton} onClick={() => prepareRoute(recommended)}>从这里开始</button>
+              <button className={styles.textButton} onClick={previousAssessment}>修改上一题</button>
               <button className={styles.textButton} onClick={() => { setAssessmentStep(0); setAssessmentScore([]); }}>重新测试</button>
             </section>
           )}
@@ -697,6 +777,13 @@ export default function HuixuApp() {
             <small>{selected.days} DAYS</small>
             <h2>{selected.name}</h2>
             <p>{selected.description}</p>
+          </section>
+          <section className={styles.setupDetails}>
+            <div className={styles.setupTitle}><span>这条路线具体做什么？</span><small>开始前可以完整确认挑战内容</small></div>
+            {routeDetails[pendingRoute].groups.map((group) => (
+              <div key={group.label}><b>{group.label}</b><ul>{group.items.map((item) => <li key={item}>{item}</li>)}</ul></div>
+            ))}
+            <div className={styles.setupRules}><b>完成规则</b><ol>{routeDetails[pendingRoute].rules.map((rule) => <li key={rule}>{rule}</li>)}</ol></div>
           </section>
           <div className={styles.setupGroup}>
             <div className={styles.setupTitle}><span>什么时候开始？</span><small>只生成正式开始后的挑战日</small></div>
@@ -873,6 +960,10 @@ export default function HuixuApp() {
                 ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value} {label === "可选挑战累计" ? "次" : "天"}</b></div>)}
               </div>
             )}
+            <article className={styles.insightCard}>
+              <div className={styles.insightOrb} />
+              <div><small>DAY {String(day).padStart(2, "0")}</small><p>{encouragements[route][Math.min(day - 1, encouragements[route].length - 1)]}</p></div>
+            </article>
           </div>
         )}
 
@@ -895,12 +986,16 @@ export default function HuixuApp() {
                 <option value="all">全部状态</option><option value="counted">已达标</option><option value="not-counted">未达标／未记录</option>
               </select>
             </div>
-            <div className={styles.recordMonth}><span>‹</span><b>{new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(new Date())}</b><span>›</span></div>
+            {recordMode === "calendar" && <div className={styles.recordMonth}><button onClick={() => changeRecordMonth(-1)} aria-label="上个月">‹</button><b>{new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(calendarCursor)}</b><button onClick={() => changeRecordMonth(1)} aria-label="下个月">›</button></div>}
             {recordMode === "calendar" ? (
               <div className={styles.recordCalendar}>
-                {Array.from({ length: currentRoute.days }, (_, index) => {
-                  const record = filteredHistory.find((item) => item.day === index + 1);
-                  return <button key={index} className={record?.counted ? styles.calendarDone : record ? styles.calendarPartial : ""} disabled={!record} onClick={() => record && setDetailRecord(record)}><small>DAY</small>{index + 1}</button>;
+                {['一','二','三','四','五','六','日'].map((label) => <span className={styles.calendarWeekday} key={label}>{label}</span>)}
+                {Array.from({ length: calendarOffset }, (_, index) => <i key={`blank-${index}`} />)}
+                {Array.from({ length: calendarDays }, (_, index) => {
+                  const dateNumber = index + 1;
+                  const key = `${recordMonthCursor}-${String(dateNumber).padStart(2, "0")}`;
+                  const record = calendarRecords.get(key);
+                  return <button key={key} className={record?.counted ? styles.calendarDone : record ? styles.calendarPartial : ""} disabled={!record} onClick={() => record && setDetailRecord(record)}><b>{dateNumber}</b>{record && <small>DAY {record.day}</small>}</button>;
                 })}
               </div>
             ) : <div className={styles.recordTimeline}>
@@ -917,10 +1012,6 @@ export default function HuixuApp() {
                 </article>
               ))}
             </div>}
-            <article className={styles.insightCard}>
-              <div className={styles.insightOrb} />
-              <div><small>DAY {String(day).padStart(2, "0")}</small><p>{encouragements[route][Math.min(day - 1, encouragements[route].length - 1)]}</p></div>
-            </article>
           </div>
         )}
 
@@ -973,7 +1064,12 @@ export default function HuixuApp() {
               <button onClick={browseOtherRoutes}><span>⌁</span><div><b>查看其他挑战路线</b><small>浏览不会改变当前挑战</small></div></button>
               {lifecycle === "active" || lifecycle === "paused" ? <button onClick={() => setEndingOpen(true)}><span>□</span><div><b>提前结束这轮挑战</b><small>保留全部事实并生成归档</small></div></button> : null}
               <button onClick={() => setTab("history")}><span>◷</span><div><b>历史挑战</b><small>{archives.length ? `${archives.length} 轮过去的挑战` : "过去完成或结束的挑战会保存在这里"}</small></div></button>
-              <button onClick={() => setAnalyticsConsent(analyticsConsent === "accepted" ? "declined" : "accepted")}><span>◉</span><div><b>匿名使用统计</b><small>{analyticsConsent === "accepted" ? "已开启 · 点击关闭" : "已关闭 · 点击开启"}</small></div></button>
+              <button onClick={installApp}><span>▣</span><div><b>{appInstalled ? "回序已安装" : "安装回序"}</b><small>{appInstalled ? "可从桌面或主屏幕直接打开" : "添加到手机主屏幕或电脑桌面"}</small></div></button>
+              <button onClick={() => {
+                if (!analyticsAvailable) return showToast("匿名统计尚未接入，目前不会发送任何数据");
+                setAnalyticsConsent(analyticsConsent === "accepted" ? "declined" : "accepted");
+                setAnalyticsPromptSeen(true);
+              }}><span>◉</span><div><b>匿名使用统计</b><small>{!analyticsAvailable ? "尚未接入 · 当前不会发送数据" : analyticsConsent === "accepted" ? "已开启 · 点击关闭" : "已关闭 · 点击开启"}</small></div></button>
               <button onClick={resetDemo}><span>↺</span><div><b>重置产品演示</b><small>清除这台设备上的演示数据</small></div></button>
             </div>
           </div>
@@ -1047,14 +1143,15 @@ export default function HuixuApp() {
               <div className={styles.sheetHandle} />
               <small>温柔提醒</small>
               <h2>为一天设置边界</h2>
-              <p>回序只记录你选择的时间，不会强制打断你。浏览器提醒将在后续原生版本接入。</p>
+              <p>当前提醒只在回序网页保持打开时生效；关闭网页、锁屏或浏览器进入后台后不能保证准时提醒。可靠的后台推送会在后续版本单独接入。</p>
               <label className={styles.toggleRow}>
                 <span><b>启用提醒时段</b><small>保存起床与晚间收尾时间</small></span>
                 <input type="checkbox" checked={reminder.enabled} onChange={async (event) => {
                   const enabled = event.target.checked;
-                  if (enabled && "Notification" in window && Notification.permission === "default") await Notification.requestPermission();
-                  setReminder({ ...reminder, enabled: enabled && (!("Notification" in window) || Notification.permission === "granted") });
-                  if (enabled && "Notification" in window && Notification.permission === "denied") showToast("通知权限未开启，时间设置仍会保存");
+                  if (enabled && !("Notification" in window)) return showToast("当前浏览器不支持网页通知");
+                  if (enabled && Notification.permission === "default") await Notification.requestPermission();
+                  setReminder({ ...reminder, enabled: enabled && Notification.permission === "granted" });
+                  if (enabled && Notification.permission === "denied") showToast("通知权限未开启，时间设置仍会保存");
                 }} />
               </label>
               <div className={styles.timeGrid}>
@@ -1104,20 +1201,30 @@ export default function HuixuApp() {
                 <div className={styles.recordTaskList}>{(archiveRecordOpen.tasks ?? getTasks(archiveOpen.route, archiveRecordOpen.day)).map((task) => <div key={task.id} className={archiveRecordOpen.doneIds.includes(task.id) ? styles.recordDone : ""}><span>{task.icon}</span><b>{task.name}<small>{archiveRecordOpen.taskNotes?.[task.id]}</small></b><i>{archiveRecordOpen.doneIds.includes(task.id) ? "✓" : "未完成"}</i></div>)}</div>
                 {archiveRecordOpen.note && <blockquote>“{archiveRecordOpen.note}”</blockquote>}
               </> : <div className={`${styles.recordTaskList} ${styles.archiveDays}`}>
-                {archiveOpen.history.map((record) => <button key={record.day} onClick={() => setArchiveRecordOpen(record)} className={record.counted ? styles.recordDone : ""}><span>{record.counted ? "◆" : "◇"}</span><b>DAY {String(record.day).padStart(2, "0")}<small>{archiveOpen.route === "21" ? encouragements["21"][Math.min(record.day - 1, 20)] : record.stage}</small></b><i>{record.status ? `${record.status} ` : ""}›</i></button>)}
+                {archiveOpen.history.map((record) => <button key={record.day} onClick={() => setArchiveRecordOpen(record)} className={record.counted ? styles.recordDone : ""}><span>{record.counted ? "◆" : "◇"}</span><b>DAY {String(record.day).padStart(2, "0")}<small>{record.date} · 完成{record.doneIds.length}项</small></b><i>{record.status ? `${record.status} ` : ""}›</i></button>)}
               </div>}
               {!archiveRecordOpen && <button className={styles.secondaryButton} onClick={() => exportArchiveMarkdown(archiveOpen)}>下载 Markdown</button>}
               <button className={styles.secondaryButton} onClick={() => { setArchiveOpen(null); setArchiveRecordOpen(null); }}>关闭</button>
             </section>
           </div>
         )}
-        {analyticsConsent === "pending" && screen === "app" && (
+        {analyticsAvailable && analyticsConsent === "pending" && !analyticsPromptSeen && history.length > 0 && screen === "app" && (
           <div className={styles.sheetBackdrop}>
             <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="匿名统计设置">
               <div className={styles.sheetHandle} /><small>数据与隐私</small><h2>帮助回序变得更好</h2>
               <p>回序希望收集匿名的页面访问与功能使用统计，用于改进产品。不会上传你的每日记录、挑战内容、时间设置或备份文件。</p>
-              <button className={styles.primaryButton} onClick={() => setAnalyticsConsent("accepted")}>允许匿名统计</button>
-              <button className={styles.textButton} onClick={() => setAnalyticsConsent("declined")}>暂不允许</button>
+              <button className={styles.primaryButton} onClick={() => { setAnalyticsConsent("accepted"); setAnalyticsPromptSeen(true); }}>允许匿名统计</button>
+              <button className={styles.textButton} onClick={() => { setAnalyticsConsent("declined"); setAnalyticsPromptSeen(true); }}>不允许</button>
+              <button className={styles.textButton} onClick={() => setAnalyticsPromptSeen(true)}>以后再决定</button>
+            </section>
+          </div>
+        )}
+        {installGuideOpen && (
+          <div className={styles.sheetBackdrop} onClick={() => setInstallGuideOpen(false)}>
+            <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="安装回序" onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} /><small>安装到桌面</small><h2>把回序放到主屏幕</h2>
+              <p>iPhone／iPad：使用 Safari 打开回序，点击底部“分享”，再选择“添加到主屏幕”。其他浏览器可以在菜单中选择“安装应用”或“添加到主屏幕”。</p>
+              <button className={styles.primaryButton} onClick={() => setInstallGuideOpen(false)}>知道了</button>
             </section>
           </div>
         )}
