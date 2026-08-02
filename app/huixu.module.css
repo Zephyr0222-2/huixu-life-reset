@@ -1886,6 +1886,13 @@
   font-size: 15px;
 }
 
+.reminderLimit {
+  margin: 10px 2px 16px !important;
+  color: #929aad !important;
+  font-size: 9px !important;
+  line-height: 1.65 !important;
+}
+
 .hiddenInput {
   display: none;
 }

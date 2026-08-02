@@ -99,6 +99,7 @@ export default function HuixuApp() {
   const [recordQuery, setRecordQuery] = useState("");
   const [searchingRecords, setSearchingRecords] = useState(false);
   const [reminder, setReminder] = useState({ morning: "08:00", evening: "22:30", enabled: false });
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
   const [toast, setToast] = useState("");
   const [pendingRoute, setPendingRoute] = useState<RouteKey>("21");
   const [challengeSettings, setChallengeSettings] = useState<ChallengeSettings>({
@@ -203,6 +204,7 @@ export default function HuixuApp() {
 
   useEffect(() => {
     if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
+    setNotificationPermission("Notification" in window ? Notification.permission : "unsupported");
   }, []);
 
   useEffect(() => {
@@ -223,22 +225,56 @@ export default function HuixuApp() {
 
   useEffect(() => {
     if (!reminder.enabled || lifecycle !== "active" || !("Notification" in window) || Notification.permission !== "granted") return;
-    const notifyAtMatchingMinute = () => {
-      const current = new Date();
-      const time = `${String(current.getHours()).padStart(2, "0")}:${String(current.getMinutes()).padStart(2, "0")}`;
-      [reminder.morning, reminder.evening].forEach((target, index) => {
-        if (time !== target) return;
-        const sentKey = `huixu-reminder-${localDateKey(current)}-${index}`;
-        if (sessionStorage.getItem(sentKey)) return;
-        sessionStorage.setItem(sentKey, "1");
-        new Notification(index === 0 ? "回序 · 今天" : "回序 · 晚间收尾", {
-          body: index === 0 ? "今天的挑战已经准备好，从能承受的一件事开始。" : "今天的记录还没有结束，需要时可以回来继续。",
-        });
-      });
+    let timer = 0;
+    const entries = [
+      { kind: "morning" as const, time: reminder.morning },
+      { kind: "evening" as const, time: reminder.evening },
+    ];
+    const occurrence = (time: string, dayOffset = 0) => {
+      const [hour, minute] = time.split(":").map(Number);
+      const target = new Date();
+      target.setDate(target.getDate() + dayOffset);
+      target.setHours(hour, minute, 0, 0);
+      return target;
     };
-    notifyAtMatchingMinute();
-    const timer = window.setInterval(notifyAtMatchingMinute, 15000);
-    return () => window.clearInterval(timer);
+    const sentKey = (kind: "morning" | "evening", target: Date) => `huixu-reminder-${localDateKey(target)}-${kind}`;
+    const deliver = async (kind: "morning" | "evening", target: Date) => {
+      const key = sentKey(kind, target);
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, new Date().toISOString());
+      try {
+        await showReminderNotification(kind);
+      } catch {
+        localStorage.removeItem(key);
+      }
+    };
+    const schedule = () => {
+      window.clearTimeout(timer);
+      const now = Date.now();
+      const gracePeriod = 30 * 60 * 1000;
+      const due = entries
+        .map((entry) => ({ ...entry, target: occurrence(entry.time) }))
+        .find((entry) => now >= entry.target.getTime() && now - entry.target.getTime() <= gracePeriod && !localStorage.getItem(sentKey(entry.kind, entry.target)));
+      if (due) {
+        void deliver(due.kind, due.target).finally(schedule);
+        return;
+      }
+      const next = entries
+        .flatMap((entry) => [0, 1].map((offset) => ({ ...entry, target: occurrence(entry.time, offset) })))
+        .filter((entry) => entry.target.getTime() > now && !localStorage.getItem(sentKey(entry.kind, entry.target)))
+        .sort((a, b) => a.target.getTime() - b.target.getTime())[0];
+      if (!next) return;
+      timer = window.setTimeout(() => void deliver(next.kind, next.target).finally(schedule), Math.min(next.target.getTime() - now, 2147483647));
+    };
+    const resume = () => { if (document.visibilityState === "visible") schedule(); };
+    schedule();
+    window.addEventListener("focus", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
   }, [reminder, lifecycle]);
 
   const completed = useMemo(() => checkins.filter((item) => item.done).length, [checkins]);
@@ -313,6 +349,40 @@ export default function HuixuApp() {
   function showToast(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 2200);
+  }
+
+  async function requestReminderPermission() {
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+      setNotificationPermission("unsupported");
+      showToast("当前浏览器不支持系统提醒；iPhone 请先把回序添加到主屏幕");
+      return false;
+    }
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    setNotificationPermission(permission);
+    if (permission === "denied") showToast("通知权限已关闭，请在系统或浏览器设置中允许回序通知");
+    return permission === "granted";
+  }
+
+  async function showReminderNotification(kind: "morning" | "evening" | "test") {
+    const registration = await navigator.serviceWorker.ready;
+    const isEvening = kind === "evening";
+    await registration.showNotification(kind === "test" ? "回序 · 测试提醒" : isEvening ? "回序 · 晚间收尾" : "回序 · 今天", {
+      body: kind === "test" ? "系统提醒已成功开启。之后会按你设置的时间出现。" : isEvening ? "今天的记录还没有结束，需要时可以回来继续。" : "今天的挑战已经准备好，从能承受的一件事开始。",
+      icon: "/icon-v2-192.png",
+      badge: "/icon-v2-192.png",
+      tag: `huixu-${kind}`,
+      data: { url: "/" },
+    });
+  }
+
+  async function sendTestReminder() {
+    if (!(await requestReminderPermission())) return;
+    try {
+      await showReminderNotification("test");
+      showToast("测试提醒已发送");
+    } catch {
+      showToast("测试提醒发送失败，请重新打开回序后再试");
+    }
   }
 
   function trackAnonymousEvent(name: string, data: Record<string, string | number> = {}) {
@@ -1191,15 +1261,13 @@ export default function HuixuApp() {
               <div className={styles.sheetHandle} />
               <small>温柔提醒</small>
               <h2>为一天设置边界</h2>
-              <p>当前提醒只在回序网页保持打开时生效；关闭网页、锁屏或浏览器进入后台后不能保证准时提醒。可靠的后台推送会在后续版本单独接入。</p>
+              <p>开启后，回序会在早晨和晚间通过系统通知提醒你。网页正在运行时会准点触发；从后台恢复时，会补发最近 30 分钟内错过的提醒。</p>
               <label className={styles.toggleRow}>
-                <span><b>启用提醒时段</b><small>保存起床与晚间收尾时间</small></span>
+                <span><b>启用系统提醒</b><small>{notificationPermission === "granted" ? "通知权限已允许" : notificationPermission === "denied" ? "通知权限已被拒绝" : notificationPermission === "unsupported" ? "当前浏览器不支持" : "开启时会申请通知权限"}</small></span>
                 <input type="checkbox" checked={reminder.enabled} onChange={async (event) => {
                   const enabled = event.target.checked;
-                  if (enabled && !("Notification" in window)) return showToast("当前浏览器不支持网页通知");
-                  if (enabled && Notification.permission === "default") await Notification.requestPermission();
-                  setReminder({ ...reminder, enabled: enabled && Notification.permission === "granted" });
-                  if (enabled && Notification.permission === "denied") showToast("通知权限未开启，时间设置仍会保存");
+                  const allowed = enabled ? await requestReminderPermission() : false;
+                  setReminder({ ...reminder, enabled: enabled && allowed });
                 }} />
               </label>
               <div className={styles.timeGrid}>
@@ -1217,6 +1285,8 @@ export default function HuixuApp() {
                   }} /><i>—</i><input type="time" value={challengeSettings.wakeEnd} readOnly /></div>
                 </div>
               )}
+              <button className={styles.secondaryButton} onClick={sendTestReminder}>发送一条测试提醒</button>
+              <p className={styles.reminderLimit}>如果完全退出浏览器，纯前端网页不能自行唤醒。要在关闭网页后仍准点收到提醒，需要后续接入匿名 Web Push 服务；iPhone 还需要先将回序添加到主屏幕。</p>
               <button className={styles.primaryButton} onClick={() => {
                 if (!settled) setCheckins((items) => items.map((item) => item.id === "stable-wake" || item.id === "long-wake"
                   ? { ...item, detail: `${challengeSettings.wakeStart}—${challengeSettings.wakeEnd} 内起床`, description: `在你设置的 ${challengeSettings.wakeStart}—${challengeSettings.wakeEnd} 时间范围内起床并离开床铺。` }
