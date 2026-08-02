@@ -212,6 +212,74 @@
   overflow-y: auto;
 }
 
+.infoShell {
+  padding: 24px 22px 30px;
+  overflow-y: auto;
+}
+
+.aboutHero {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 16px;
+  border-radius: 24px;
+  background: linear-gradient(120deg, rgba(226,243,253,.78), rgba(239,232,250,.76));
+  border: 1px solid rgba(255,255,255,.82);
+}
+
+.aboutHero small { color: #7f8ca8; font-size: 9px; }
+.aboutHero h2 { margin: 5px 0; font-size: 23px; font-weight: 620; }
+.aboutHero p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+
+.infoSections {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 20px;
+}
+
+.infoSections section,
+.feedbackIntro {
+  padding: 17px 18px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.52);
+  border: 1px solid rgba(145,157,184,.12);
+}
+
+.infoSections h2,
+.feedbackIntro h2 { margin: 0 0 8px; font-size: 14px; font-weight: 620; }
+.infoSections p,
+.infoSections li,
+.feedbackIntro p { color: var(--muted); font-size: 10px; line-height: 1.75; }
+.infoSections p,
+.feedbackIntro p { margin: 0; }
+.infoSections ul { margin: 0; padding-left: 18px; }
+.versionNote,
+.feedbackPrivacy { margin: 14px 0 0; text-align: center; color: var(--faint); font-size: 9px; line-height: 1.6; }
+
+.feedbackIntro { margin-bottom: 16px; }
+.feedbackQr {
+  display: block;
+  width: min(100%, 310px);
+  margin: 0 auto 16px;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 16px 38px rgba(83,96,133,.11);
+}
+
+.primaryLink {
+  min-height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 17px;
+  color: #fff;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(110deg, #91c5ec, #b7a6e5);
+  box-shadow: 0 12px 28px rgba(148,157,215,.22);
+}
+
 .pageHeader {
   display: grid;
   grid-template-columns: 46px 1fr;
@@ -964,6 +1032,17 @@
 .settingsGroup b { font-size: 12px; font-weight: 550; }
 .settingsGroup small { color: var(--muted); font-size: 9px; }
 
+.settingsSection { margin-top: 18px; }
+.settingsSection > h2 {
+  margin: 0 0 8px 5px;
+  color: #929cb1;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+}
+.dangerSection .settingsGroup button > span,
+.dangerSection .settingsGroup b { color: #bd6e74; }
+
 .pausePanel {
   min-height: 560px;
   display: flex;
@@ -1243,6 +1322,34 @@
   color: #7586b1;
   background: rgba(255,255,255,.72);
   cursor: pointer;
+}
+
+.clearConfirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 2px;
+  color: #747f97;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.clearConfirm input { width: 17px; height: 17px; accent-color: #b6757c; }
+
+.dangerButton {
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-radius: 16px;
+  color: #fff;
+  background: #b96f77;
+  cursor: pointer;
+}
+
+.dangerButton:disabled {
+  color: #a7abb5;
+  background: #e6e7eb;
+  cursor: not-allowed;
 }
 
 .actionInput {
@@ -1853,6 +1960,8 @@
   }
 
   .routeShell,
+  .setupShell,
+  .infoShell,
   .assessmentShell {
     padding-top: max(24px, calc(env(safe-area-inset-top) + 10px));
     padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 18px));

@@ -14,7 +14,7 @@ import {
   type TaskDefinition,
 } from "./challengeData";
 
-type Screen = "welcome" | "routes" | "assessment" | "setup" | "app";
+type Screen = "welcome" | "routes" | "assessment" | "setup" | "about" | "feedback" | "app";
 type Tab = "today" | "progress" | "records" | "history" | "me";
 
 type Checkin = TaskDefinition & { done: boolean };
@@ -56,6 +56,7 @@ type ChallengeArchive = {
 };
 
 const storageKey = "huixu-v1-state";
+const feedbackUrl = "https://ucn5152u7qk7.feishu.cn/share/base/form/shrcnFBlXn4XxkRGsAdwJx06C2f";
 
 function localDateKey(value: string | Date) {
   const date = typeof value === "string" ? new Date(value) : value;
@@ -123,6 +124,8 @@ export default function HuixuApp() {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [installGuideOpen, setInstallGuideOpen] = useState(false);
   const [appInstalled, setAppInstalled] = useState(false);
+  const [clearDataOpen, setClearDataOpen] = useState(false);
+  const [clearDataAcknowledged, setClearDataAcknowledged] = useState(false);
   const [routesFromApp, setRoutesFromApp] = useState(false);
   const [supplementText, setSupplementText] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
@@ -510,27 +513,9 @@ export default function HuixuApp() {
     setDetailTask(null);
   }
 
-  function resetDemo() {
+  function clearAllData() {
     localStorage.removeItem(storageKey);
-    void clearIndexedState();
-    setScreen("welcome");
-    setTab("today");
-    setRoute("21");
-    setDay(8);
-    setCheckins(getTasks("21", 8).map((task, index) => ({ ...task, done: index < 2 })));
-    setNote("");
-    setTaskNotes({});
-    setSkippedIds([]);
-    setSettled(false);
-    setLifecycle("active");
-    setHistory([]);
-    setStartedAt("");
-    setChallengeId("");
-    setArchives([]);
-    setChallengeRulesVersion(rulesVersion);
-    setAnalyticsConsent("pending");
-    setAnalyticsPromptSeen(false);
-    setRoutesFromApp(false);
+    void clearIndexedState().then(() => window.location.reload());
   }
 
   function settleToday() {
@@ -669,10 +654,7 @@ export default function HuixuApp() {
         <section className={`${styles.phoneShell} ${styles.routeShell}`}>
           <header className={styles.pageHeader}>
             <button className={styles.iconButton} onClick={() => setScreen(routesFromApp ? "app" : "welcome")} aria-label="返回">‹</button>
-            <div>
-              <p className={styles.eyebrow}>选择你的起点</p>
-              <h1>现在，哪条路<br />更适合你？</h1>
-            </div>
+            <div><h1>选择适合现在的路线</h1></div>
           </header>
           {routesFromApp && <p className={styles.routeWarning}>你当前的挑战仍会保留。建议先完成或结束当前挑战，再开启新的路线。</p>}
           <div className={styles.routeList}>
@@ -771,7 +753,7 @@ export default function HuixuApp() {
         <section className={`${styles.phoneShell} ${styles.setupShell}`}>
           <header className={styles.pageHeader}>
             <button className={styles.iconButton} onClick={() => setScreen("routes")} aria-label="返回">‹</button>
-            <div><p className={styles.eyebrow}>开始前设置</p><h1>把节奏设成<br />适合你的样子。</h1></div>
+            <div><h1>开始前设置</h1></div>
           </header>
           <section className={styles.setupRoute}>
             <small>{selected.days} DAYS</small>
@@ -810,6 +792,52 @@ export default function HuixuApp() {
             <button className={styles.primaryButton} onClick={() => startRoute(pendingRoute)}>{startChoice === "today" ? "今天开始挑战" : "准备好，明天开始"}</button>
             <p>设置会保存在这台设备上，之后可以调整。</p>
           </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (screen === "about") {
+    return (
+      <main className={styles.centerStage}>
+        <section className={`${styles.phoneShell} ${styles.infoShell}`}>
+          <header className={styles.pageHeader}>
+            <button className={styles.iconButton} onClick={() => { setScreen("app"); setTab("me"); }} aria-label="返回">‹</button>
+            <div><h1>关于回序</h1></div>
+          </header>
+          <section className={styles.aboutHero}>
+            <BrandOrbit compact />
+            <div><small>从混乱，回到自己的节奏</small><h2>回序</h2><p>一套不依赖账号、以真实生活为起点的渐进式挑战系统。</p></div>
+          </section>
+          <div className={styles.infoSections}>
+            <section><h2>为什么做回序</h2><p>生活混乱时，人往往不需要更多目标，而需要一个可以重新开始的顺序。回序不要求连续打卡，也不把中断视为失败，只帮助你看清今天真实完成了什么。</p></section>
+            <section><h2>三条挑战路线</h2><ul><li><b>7日清场</b>：先清理眼前最真实的阻力。</li><li><b>21日稳定</b>：建立起床、活动和注意力的基本节奏。</li><li><b>50日挑战</b>：长期实践一套更完整的生活规则。</li></ul></section>
+            <section><h2>产品原则</h2><ul><li>严格记录事实，温柔对待结果。</li><li>中断不会让已经发生的行动归零。</li><li>基础生活优先，不制造新的完成压力。</li></ul></section>
+            <section><h2>数据与隐私</h2><p>回序不要求注册登录。每日记录、挑战内容和时间设置默认只保存在这台设备上；匿名统计未接入时不会发送任何数据，接入后也不会上传你的文字记录。</p></section>
+            <section><h2>免费与开源</h2><p>回序计划以免费、非商业化和开源的方式持续迭代，希望让更多人能够使用、讨论和改进它。</p></section>
+          </div>
+          <button className={styles.primaryButton} onClick={() => setScreen("feedback")}>反馈与建议</button>
+          <p className={styles.versionNote}>当前版本 0.1.0</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (screen === "feedback") {
+    return (
+      <main className={styles.centerStage}>
+        <section className={`${styles.phoneShell} ${styles.infoShell}`}>
+          <header className={styles.pageHeader}>
+            <button className={styles.iconButton} onClick={() => { setScreen("app"); setTab("me"); }} aria-label="返回">‹</button>
+            <div><h1>反馈与建议</h1></div>
+          </header>
+          <section className={styles.feedbackIntro}>
+            <h2>你的真实体验，会帮助回序继续变好。</h2>
+            <p>可以告诉我哪里不清楚、哪个功能不好用，或者哪条挑战规则真正帮助到了你。</p>
+          </section>
+          <img className={styles.feedbackQr} src="/feedback-qr.png" alt="回序用户满意度调查二维码" />
+          <a className={styles.primaryLink} href={feedbackUrl} target="_blank" rel="noreferrer">打开飞书反馈表</a>
+          <p className={styles.feedbackPrivacy}>表单不会自动读取或上传你的回序挑战记录，请按自己的意愿填写。</p>
         </section>
       </main>
     );
@@ -1037,41 +1065,61 @@ export default function HuixuApp() {
 
         {tab === "me" && (
           <div className={styles.screenContent}>
-            <header className={styles.appHeader}><div><p>本地优先</p><h1>我的</h1></div></header>
+            <header className={styles.appHeader}><div><h1>我的</h1></div></header>
             <section className={styles.profileCard}>
               <BrandOrbit compact />
               <div><small>{lifecycle === "paused" ? "已暂停" : lifecycle === "finished" ? "已结束" : "当前挑战"}</small><h2>{currentRoute.name}</h2><p>DAY {day} · {history.length}天记录保存在本机</p></div>
             </section>
-            <div className={styles.settingsGroup}>
-              <button onClick={() => setSettingsOpen(true)}><span>◴</span><div><b>提醒与时间设置</b><small>{reminder.enabled ? `${reminder.morning} · ${reminder.evening}` : "当前未开启"}</small></div></button>
-              {lifecycle !== "finished" && (
+            <section className={styles.settingsSection}>
+              <h2>当前挑战</h2>
+              <div className={styles.settingsGroup}>
+                <button onClick={() => setSettingsOpen(true)}><span>◴</span><div><b>提醒与时间设置</b><small>{reminder.enabled ? `${reminder.morning} · ${reminder.evening}` : "当前未开启"}</small></div></button>
+                {lifecycle !== "finished" && (
+                  <button onClick={() => {
+                    if (lifecycle === "active" && !settled && (completed > 0 || note.trim() || Object.keys(taskNotes).length)) {
+                      showToast("今天已有内容，请先完成今日记录再暂停");
+                      setTab("today");
+                      return;
+                    }
+                    setLifecycle(lifecycle === "paused" ? "active" : "paused");
+                  }}>
+                    <span>{lifecycle === "paused" ? "▶" : "Ⅱ"}</span>
+                    <div><b>{lifecycle === "paused" ? "恢复挑战" : "暂停挑战"}</b><small>{lifecycle === "paused" ? "从当前挑战日继续" : "暂停期间不生成新的挑战日"}</small></div>
+                  </button>
+                )}
+                <button onClick={browseOtherRoutes}><span>⌁</span><div><b>查看其他挑战路线</b><small>浏览不会改变当前挑战</small></div></button>
+                {lifecycle === "active" || lifecycle === "paused" ? <button onClick={() => setEndingOpen(true)}><span>□</span><div><b>提前结束这轮挑战</b><small>保留全部事实并生成归档</small></div></button> : null}
+              </div>
+            </section>
+            <section className={styles.settingsSection}>
+              <h2>记录与数据</h2>
+              <div className={styles.settingsGroup}>
+                <button onClick={() => setTab("history")}><span>◷</span><div><b>历史挑战</b><small>{archives.length ? `${archives.length} 轮过去的挑战` : "过去完成或结束的挑战会保存在这里"}</small></div></button>
+                <button onClick={exportMarkdown}><span>≡</span><div><b>导出当前挑战可阅读记录</b><small>仅包含当前挑战，生成 Markdown 文件</small></div></button>
+                <button onClick={exportBackup}><span>⇩</span><div><b>导出完整备份</b><small>包含当前挑战与全部历史挑战，可完整恢复</small></div></button>
+                <button onClick={() => importRef.current?.click()}><span>⇧</span><div><b>从备份恢复</b><small>选择此前导出的回序文件</small></div></button>
+              </div>
+            </section>
+            <input ref={importRef} className={styles.hiddenInput} type="file" accept=".huixu,application/json,.json" onChange={(event) => restoreBackup(event.target.files?.[0])} />
+            <section className={styles.settingsSection}>
+              <h2>应用设置</h2>
+              <div className={styles.settingsGroup}>
+                <button onClick={installApp}><span>▣</span><div><b>{appInstalled ? "回序已安装" : "安装回序"}</b><small>{appInstalled ? "可从桌面或主屏幕直接打开" : "添加到手机主屏幕或电脑桌面"}</small></div></button>
                 <button onClick={() => {
-                  if (lifecycle === "active" && !settled && (completed > 0 || note.trim() || Object.keys(taskNotes).length)) {
-                    showToast("今天已有内容，请先完成今日记录再暂停");
-                    setTab("today");
-                    return;
-                  }
-                  setLifecycle(lifecycle === "paused" ? "active" : "paused");
-                }}>
-                  <span>{lifecycle === "paused" ? "▶" : "Ⅱ"}</span>
-                  <div><b>{lifecycle === "paused" ? "恢复挑战" : "暂停挑战"}</b><small>{lifecycle === "paused" ? "从当前挑战日继续" : "暂停期间不生成新的挑战日"}</small></div>
-                </button>
-              )}
-              <button onClick={exportBackup}><span>⇩</span><div><b>导出完整备份</b><small>包含当前挑战与全部历史挑战，可完整恢复</small></div></button>
-              <button onClick={exportMarkdown}><span>≡</span><div><b>导出阅读记录</b><small>生成可查看的Markdown文件</small></div></button>
-              <button onClick={() => importRef.current?.click()}><span>⇧</span><div><b>从备份恢复</b><small>选择此前导出的回序文件</small></div></button>
-              <input ref={importRef} className={styles.hiddenInput} type="file" accept=".huixu,application/json,.json" onChange={(event) => restoreBackup(event.target.files?.[0])} />
-              <button onClick={browseOtherRoutes}><span>⌁</span><div><b>查看其他挑战路线</b><small>浏览不会改变当前挑战</small></div></button>
-              {lifecycle === "active" || lifecycle === "paused" ? <button onClick={() => setEndingOpen(true)}><span>□</span><div><b>提前结束这轮挑战</b><small>保留全部事实并生成归档</small></div></button> : null}
-              <button onClick={() => setTab("history")}><span>◷</span><div><b>历史挑战</b><small>{archives.length ? `${archives.length} 轮过去的挑战` : "过去完成或结束的挑战会保存在这里"}</small></div></button>
-              <button onClick={installApp}><span>▣</span><div><b>{appInstalled ? "回序已安装" : "安装回序"}</b><small>{appInstalled ? "可从桌面或主屏幕直接打开" : "添加到手机主屏幕或电脑桌面"}</small></div></button>
-              <button onClick={() => {
-                if (!analyticsAvailable) return showToast("匿名统计尚未接入，目前不会发送任何数据");
-                setAnalyticsConsent(analyticsConsent === "accepted" ? "declined" : "accepted");
-                setAnalyticsPromptSeen(true);
-              }}><span>◉</span><div><b>匿名使用统计</b><small>{!analyticsAvailable ? "尚未接入 · 当前不会发送数据" : analyticsConsent === "accepted" ? "已开启 · 点击关闭" : "已关闭 · 点击开启"}</small></div></button>
-              <button onClick={resetDemo}><span>↺</span><div><b>重置产品演示</b><small>清除这台设备上的演示数据</small></div></button>
-            </div>
+                  if (!analyticsAvailable) return showToast("匿名统计尚未接入，目前不会发送任何数据");
+                  setAnalyticsConsent(analyticsConsent === "accepted" ? "declined" : "accepted");
+                  setAnalyticsPromptSeen(true);
+                }}><span>◉</span><div><b>匿名使用统计</b><small>{!analyticsAvailable ? "尚未接入 · 当前不会发送数据" : analyticsConsent === "accepted" ? "已开启 · 点击关闭" : "已关闭 · 点击开启"}</small></div></button>
+                <button onClick={() => setScreen("feedback")}><span>✦</span><div><b>反馈与建议</b><small>填写回序用户满意度调查</small></div></button>
+                <button onClick={() => setScreen("about")}><span>序</span><div><b>关于回序</b><small>了解产品理念、隐私与开源计划</small></div></button>
+              </div>
+            </section>
+            <section className={`${styles.settingsSection} ${styles.dangerSection}`}>
+              <h2>危险操作</h2>
+              <div className={styles.settingsGroup}>
+                <button onClick={() => { setClearDataAcknowledged(false); setClearDataOpen(true); }}><span>×</span><div><b>清除本机全部数据</b><small>删除当前挑战、历史挑战和全部设置</small></div></button>
+              </div>
+            </section>
           </div>
         )}
 
@@ -1225,6 +1273,21 @@ export default function HuixuApp() {
               <div className={styles.sheetHandle} /><small>安装到桌面</small><h2>把回序放到主屏幕</h2>
               <p>iPhone／iPad：使用 Safari 打开回序，点击底部“分享”，再选择“添加到主屏幕”。其他浏览器可以在菜单中选择“安装应用”或“添加到主屏幕”。</p>
               <button className={styles.primaryButton} onClick={() => setInstallGuideOpen(false)}>知道了</button>
+            </section>
+          </div>
+        )}
+        {clearDataOpen && (
+          <div className={styles.sheetBackdrop} onClick={() => setClearDataOpen(false)}>
+            <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="清除本机全部数据" onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} /><small>危险操作</small><h2>清除本机全部数据？</h2>
+              <p>当前挑战、历史挑战、每日记录和全部设置都会永久删除。清除后无法撤销，也无法通过回序找回。</p>
+              <button className={styles.secondaryButton} onClick={exportBackup}>先导出完整备份</button>
+              <label className={styles.clearConfirm}>
+                <input type="checkbox" checked={clearDataAcknowledged} onChange={(event) => setClearDataAcknowledged(event.target.checked)} />
+                <span>我知道清除后无法恢复</span>
+              </label>
+              <button className={styles.dangerButton} disabled={!clearDataAcknowledged} onClick={clearAllData}>确认清除全部数据</button>
+              <button className={styles.textButton} onClick={() => setClearDataOpen(false)}>取消</button>
             </section>
           </div>
         )}
