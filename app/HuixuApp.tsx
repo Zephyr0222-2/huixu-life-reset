@@ -63,6 +63,14 @@ function localDateKey(value: string | Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function calendarDayDifference(start: string | Date, end: string | Date) {
+  const startDate = typeof start === "string" ? new Date(start) : start;
+  const endDate = typeof end === "string" ? new Date(end) : end;
+  const startDay = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const endDay = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  return Math.max(0, Math.floor((endDay - startDay) / 86400000));
+}
+
 function BrandOrbit({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`${styles.orbit} ${compact ? styles.orbitCompact : ""}`} aria-hidden="true">
@@ -143,24 +151,47 @@ export default function HuixuApp() {
           const savedHistory: DailyRecord[] = saved.history ?? [];
           const savedDay = saved.day ?? 1;
           const canAdvanceByDate = saved.lifecycle === "active" && saved.startedAt;
-          const elapsed = canAdvanceByDate ? Math.max(0, Math.floor((Date.now() - new Date(saved.startedAt).getTime()) / 86400000)) : 0;
+          const elapsed = canAdvanceByDate ? calendarDayDifference(saved.startedAt, new Date()) : 0;
           const targetDay = Math.min(routeInfo[savedRoute].days, Math.max(savedDay, elapsed + 1));
           const crossedDay = targetDay > savedDay;
+          const savedCheckins: Checkin[] = saved.checkins ?? getTasks(savedRoute, savedDay).map((task) => ({ ...task, done: false }));
+          const savedDoneIds = savedCheckins.filter((item) => item.done).map((item) => item.id);
+          const savedHasContent = savedDoneIds.length > 0 || Boolean(saved.note?.trim()) || Object.keys(saved.taskNotes ?? {}).length > 0 || (saved.skippedIds ?? []).length > 0;
+          const savedResult = getDayStatus(savedRoute, savedDoneIds, savedDay);
           const missed = crossedDay ? Array.from({ length: targetDay - savedDay }, (_, index) => savedDay + index)
             .filter((missedDay) => !savedHistory.some((record) => record.day === missedDay))
-            .map((missedDay) => ({
-              day: missedDay,
-              date: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(new Date(saved.startedAt).getTime() + (missedDay - 1) * 86400000)),
-              status: "未记录",
-              statusKey: "unrecorded",
-              counted: false,
-              doneIds: [],
-              note: "",
-              stage: getStageLabel(savedRoute, missedDay),
-              tasks: missedDay === savedDay && saved.checkins
-                ? saved.checkins.map(({ done: _done, ...task }: Checkin) => task)
-                : getTasks(savedRoute, missedDay),
-            } satisfies DailyRecord)) : [];
+            .map((missedDay) => {
+              const recordDate = new Date(saved.startedAt);
+              recordDate.setDate(recordDate.getDate() + missedDay - 1);
+              const isCurrentSavedDay = missedDay === savedDay;
+              if (isCurrentSavedDay && savedHasContent) {
+                return {
+                  day: missedDay,
+                  date: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(recordDate),
+                  status: savedResult.label || "未完成日",
+                  statusKey: savedResult.key,
+                  counted: savedResult.counted,
+                  doneIds: savedDoneIds,
+                  skippedIds: savedCheckins.filter((item) => !item.done).map((item) => item.id),
+                  note: saved.note ?? "",
+                  stage: getStageLabel(savedRoute, missedDay),
+                  taskNotes: saved.taskNotes ?? {},
+                  tasks: savedCheckins.map(({ done: _done, ...task }) => task),
+                  rulesVersion: saved.challengeRulesVersion ?? 1,
+                } satisfies DailyRecord;
+              }
+              return {
+                day: missedDay,
+                date: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(recordDate),
+                status: "未记录",
+                statusKey: "unrecorded",
+                counted: false,
+                doneIds: [],
+                note: "",
+                stage: getStageLabel(savedRoute, missedDay),
+                tasks: isCurrentSavedDay ? savedCheckins.map(({ done: _done, ...task }) => task) : getTasks(savedRoute, missedDay),
+              } satisfies DailyRecord;
+            }) : [];
           setScreen(saved.screen ?? "welcome");
           setRoute(savedRoute);
           setDay(targetDay);
@@ -195,6 +226,35 @@ export default function HuixuApp() {
     localStorage.setItem(storageKey, JSON.stringify(state));
     void writeIndexedState(state);
   }, [screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || lifecycle !== "active" || !startedAt || day >= routeInfo[route].days) return;
+    let timer = 0;
+    const advanceWhenDateChanges = () => {
+      const expectedDay = Math.min(routeInfo[route].days, calendarDayDifference(startedAt, new Date()) + 1);
+      if (expectedDay > day) {
+        window.location.reload();
+        return true;
+      }
+      return false;
+    };
+    const scheduleMidnightCheck = () => {
+      window.clearTimeout(timer);
+      if (advanceWhenDateChanges()) return;
+      const nextMidnight = new Date();
+      nextMidnight.setHours(24, 0, 0, 750);
+      timer = window.setTimeout(scheduleMidnightCheck, nextMidnight.getTime() - Date.now());
+    };
+    const resume = () => { if (document.visibilityState === "visible") scheduleMidnightCheck(); };
+    scheduleMidnightCheck();
+    window.addEventListener("focus", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [hydrated, lifecycle, startedAt, day, route]);
 
   useEffect(() => {
     if (!undoUntil || undoUntil <= Date.now()) return;
@@ -278,6 +338,10 @@ export default function HuixuApp() {
   }, [reminder, lifecycle]);
 
   const completed = useMemo(() => checkins.filter((item) => item.done).length, [checkins]);
+  const baseCompleted = useMemo(() => checkins.filter((item) => item.category === "base" && item.done).length, [checkins]);
+  const optionalTodayCompleted = useMemo(() => checkins.filter((item) => item.category === "optional" && item.done).length, [checkins]);
+  const todayCompleted = route === "50" ? baseCompleted : completed;
+  const todayTotal = route === "50" ? 5 : checkins.length;
   const currentRoute = routeInfo[route];
   const dayStatus = useMemo(
     () => getDayStatus(route, checkins.filter((item) => item.done).map((item) => item.id), day),
@@ -724,7 +788,7 @@ export default function HuixuApp() {
         <section className={`${styles.phoneShell} ${styles.routeShell}`}>
           <header className={styles.pageHeader}>
             <button className={styles.iconButton} onClick={() => setScreen(routesFromApp ? "app" : "welcome")} aria-label="返回">‹</button>
-            <div><h1>选择适合现在的路线</h1></div>
+            <div><h1 className={styles.routePageTitle}>选择适合现在的路线</h1></div>
           </header>
           {routesFromApp && <p className={styles.routeWarning}>你当前的挑战仍会保留。建议先完成或结束当前挑战，再开启新的路线。</p>}
           <div className={styles.routeList}>
@@ -967,7 +1031,7 @@ export default function HuixuApp() {
                 </div>
                 {dayStatus.label && <span className={styles.statusPill}>{dayStatus.label}</span>}
                 <h2>生活，回来了一点。</h2>
-                <p>完成 {completed} 个今日行动 · {checkins.length - completed} 项未完成</p>
+                <p>{route === "50" ? `基础挑战 ${baseCompleted} / 5 · 可选挑战 ${optionalTodayCompleted} / 5（不影响达标）` : `完成 ${completed} 个今日行动 · ${checkins.length - completed} 项未完成`}</p>
                 <div className={styles.miniSummary}>
                   {checkins.map((item) => (
                     <div key={item.id}>
@@ -978,9 +1042,11 @@ export default function HuixuApp() {
                   ))}
                 </div>
                 {note && <blockquote>“{note}”</blockquote>}
-                <button className={styles.primaryButton} onClick={advanceDay}>
-                  {day >= currentRoute.days ? "完成这轮挑战" : `进入 DAY ${String(day + 1).padStart(2, "0")}`}
-                </button>
+                {day >= currentRoute.days ? (
+                  <button className={styles.primaryButton} onClick={advanceDay}>完成这轮挑战</button>
+                ) : (
+                  <div className={styles.nextDayNotice}><b>DAY {String(day + 1).padStart(2, "0")} 将在明天自动开启</b><small>无需手动进入；到达本地时间凌晨后会自动切换。</small></div>
+                )}
                 <button className={styles.textButton} onClick={undoSettlement} disabled={undoSeconds === 0}>
                   {undoSeconds > 0 ? `${Math.floor(undoSeconds / 60)}:${String(undoSeconds % 60).padStart(2, "0")} 内可撤销结算` : "今日结果已锁定"}
                 </button>
@@ -991,9 +1057,9 @@ export default function HuixuApp() {
                 <div className={styles.sectionTitle}>
                   <div>
                   <span>今日打卡</span>
-                    <small>{completed} / {checkins.length} 已完成</small>
+                    <small>{todayCompleted} / {todayTotal} 已完成</small>
                   </div>
-                  <p>{route === "7" ? "完成今日清场挑战，就是完成日" : route === "21" ? "前三项固定挑战全部完成，就是稳定日；累计15个稳定日并完成15次附加挑战，即完成本轮挑战" : "五项基础挑战完成至少四项，就是达标日；累计40个达标日，即完成本轮挑战"}</p>
+                  <p>{route === "7" ? "完成今日清场挑战，就是完成日" : route === "21" ? "前三项固定挑战全部完成，就是稳定日；累计15个稳定日并完成15次附加挑战，即完成本轮挑战" : "5项基础挑战完成4项为达标日，5项全部完成为全部完成日；可选挑战不影响判定"}</p>
                 </div>
                 <div className={styles.checkinStack}>
                   {checkins.filter((item) => item.category !== "optional" && item.category !== "rotation").map((item) => renderTaskCard(item))}
@@ -1003,7 +1069,7 @@ export default function HuixuApp() {
                   <div className={styles.checkinStack}>{checkins.filter((item) => item.category === "rotation").map((item) => renderTaskCard(item, true))}</div>
                 </>}
                 {route === "50" && <section className={styles.optionalChallenges}>
-                  <button className={styles.optionalToggle} onClick={() => setOptionalOpen((value) => !value)}><span><b>可选挑战</b><small>今天已完成 {checkins.filter((item) => item.category === "optional" && item.done).length} / 5</small></span><i>{optionalOpen ? "⌃" : "⌄"}</i></button>
+                  <button className={styles.optionalToggle} onClick={() => setOptionalOpen((value) => !value)}><span><b>可选挑战</b><small>自由参考，不强制完成 · 今天完成 {optionalTodayCompleted} 次</small></span><i>{optionalOpen ? "⌃" : "⌄"}</i></button>
                   {optionalOpen && <div className={styles.checkinStack}>{checkins.filter((item) => item.category === "optional").map((item) => renderTaskCard(item, true))}</div>}
                 </section>}
                 <label className={`${styles.noteField} ${route === "50" ? styles.reflectionField : ""}`}>
@@ -1034,7 +1100,7 @@ export default function HuixuApp() {
             <section className={styles.progressHero}>
               <p>已经走过</p>
               <strong>{day}<span> / {currentRoute.days}</span></strong>
-              <small>{route === "21" ? "累计获得15个稳定日，并完成15次附加挑战，即可完成本轮挑战。三项固定挑战全部完成，当天才计为稳定日。" : route === "50" ? "累计完成40个达标日即完成挑战；每天5项基础挑战完成至少4项即为达标日。" : currentRoute.target}</small>
+              <small>{route === "21" ? "累计获得15个稳定日，并完成15次附加挑战，即可完成本轮挑战。三项固定挑战全部完成，当天才计为稳定日。" : route === "50" ? "累计完成40个达标日即完成挑战；5项基础挑战完成4项为达标日，5项全部完成为全部完成日。可选挑战只作参考，不影响达标。" : currentRoute.target}</small>
             </section>
             <div className={styles.dayGrid}>
               {Array.from({ length: currentRoute.days }, (_, index) => {
