@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import styles from "./huixu.module.css";
 import {
   getDayStatus,
@@ -13,9 +13,39 @@ import {
   type RouteKey,
   type TaskDefinition,
 } from "./challengeData";
+import {
+  customChallengeLibrary,
+  customDayStatus,
+  customRequiredCount,
+  customTaskToDefinition,
+  dateForChallengeDay,
+  endDateFor,
+  routeTaskGroups,
+  scheduledCustomTasks,
+  type CustomChallengeConfig,
+  type CustomTask,
+  type RhythmType,
+} from "./customChallenge";
+import {
+  drawLifeSpark,
+  emptyLifeSparkData,
+  lifeSparkCategories,
+  lifeSparkItems,
+  type LifeSparkData,
+  type LifeSparkItem,
+} from "./lifeSparkData";
+import {
+  calendarDayDifference,
+  challengeElapsedDays,
+  challengeHasEnded,
+  dateKeyAfter,
+  localDateKey,
+  pausedDaysAfterResume,
+} from "./challengeClock";
 
-type Screen = "welcome" | "routes" | "assessment" | "setup" | "about" | "feedback" | "app";
+type Screen = "welcome" | "routes" | "assessment" | "setup" | "custom-builder" | "life-spark" | "about" | "feedback" | "app";
 type Tab = "today" | "progress" | "records" | "history" | "me";
+type ChallengeType = "fixed" | "custom";
 
 type Checkin = TaskDefinition & { done: boolean };
 type Lifecycle = "preparing" | "active" | "paused" | "finished" | "ended";
@@ -37,6 +67,12 @@ type DailyRecord = {
   completedAt?: string;
   tasks?: TaskDefinition[];
   rulesVersion?: number;
+  scheduledTaskIds?: string[];
+  completedTaskIds?: string[];
+  totalTaskCount?: number;
+  completedTaskCount?: number;
+  requiredCompletedCount?: number;
+  dayStatus?: "completed" | "qualified" | "failed" | "pending";
 };
 
 type ChallengeSettings = {
@@ -53,22 +89,58 @@ type ChallengeArchive = {
   history: DailyRecord[];
   settings: ChallengeSettings;
   rulesVersion?: number;
+  challengeType?: ChallengeType;
+  customConfig?: CustomChallengeConfig | null;
+};
+
+type CustomDraft = {
+  challengeName: string;
+  durationDays: number;
+  startMode: "today" | "tomorrow" | "custom";
+  startDate: string;
+  selectedTasks: CustomTask[];
+  allowedMisses: number;
 };
 
 const storageKey = "huixu-v1-state";
 const feedbackUrl = "https://ucn5152u7qk7.feishu.cn/share/base/form/shrcnFBlXn4XxkRGsAdwJx06C2f";
 
-function localDateKey(value: string | Date) {
-  const date = typeof value === "string" ? new Date(value) : value;
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+function todayKey() {
+  return localDateKey(new Date());
 }
 
-function calendarDayDifference(start: string | Date, end: string | Date) {
-  const startDate = typeof start === "string" ? new Date(start) : start;
-  const endDate = typeof end === "string" ? new Date(end) : end;
-  const startDay = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-  const endDay = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
-  return Math.max(0, Math.floor((endDay - startDay) / 86400000));
+function defaultCustomDraft(): CustomDraft {
+  return {
+    challengeName: "我的生活重启挑战",
+    durationDays: 21,
+    startMode: "today",
+    startDate: todayKey(),
+    selectedTasks: [],
+    allowedMisses: 1,
+  };
+}
+
+function challengeTotalDays(type: ChallengeType, route: RouteKey, config: CustomChallengeConfig | null) {
+  return type === "custom" ? Math.min(50, Math.max(3, config?.durationDays ?? 3)) : routeInfo[route].days;
+}
+
+function challengeDisplayName(type: ChallengeType, route: RouteKey, config: CustomChallengeConfig | null) {
+  return type === "custom" ? config?.challengeName || "我的生活重启挑战" : routeInfo[route].name;
+}
+
+function tasksForChallengeDay(type: ChallengeType, route: RouteKey, config: CustomChallengeConfig | null, targetDay: number) {
+  if (type !== "custom" || !config) return getTasks(route, targetDay);
+  return scheduledCustomTasks(config, targetDay, dateForChallengeDay(config.startDate, targetDay + (config.pausedDays ?? 0))).map(customTaskToDefinition);
+}
+
+function statusForChallengeDay(type: ChallengeType, route: RouteKey, config: CustomChallengeConfig | null, tasks: TaskDefinition[], doneIds: string[], targetDay: number) {
+  if (type !== "custom") return getDayStatus(route, doneIds, targetDay);
+  const required = customRequiredCount(tasks.length, config?.dailyThresholdRule.allowedMisses ?? 0);
+  return customDayStatus(doneIds.filter((id) => tasks.some((task) => task.id === id)).length, tasks.length, required);
+}
+
+function stageForChallengeDay(type: ChallengeType, route: RouteKey, targetDay: number) {
+  return type === "custom" ? `DAY ${String(targetDay).padStart(2, "0")}` : getStageLabel(route, targetDay);
 }
 
 function BrandOrbit({ compact = false }: { compact?: boolean }) {
@@ -87,6 +159,23 @@ export default function HuixuApp() {
   const [screen, setScreen] = useState<Screen>("welcome");
   const [tab, setTab] = useState<Tab>("today");
   const [route, setRoute] = useState<RouteKey>("21");
+  const [challengeType, setChallengeType] = useState<ChallengeType>("fixed");
+  const [customConfig, setCustomConfig] = useState<CustomChallengeConfig | null>(null);
+  const [customDraft, setCustomDraft] = useState<CustomDraft>(() => defaultCustomDraft());
+  const [customStep, setCustomStep] = useState(1);
+  const [customSource, setCustomSource] = useState<"routes" | "library">("library");
+  const [customOpenGroup, setCustomOpenGroup] = useState("照顾身体");
+  const [customTaskOpen, setCustomTaskOpen] = useState<CustomTask | null>(null);
+  const [customUserTaskOpen, setCustomUserTaskOpen] = useState(false);
+  const [customUserTask, setCustomUserTask] = useState({ title: "", userGoal: "", rhythmType: "daily" as RhythmType, selectedWeekdays: [] as number[] });
+  const [customNameEditing, setCustomNameEditing] = useState(false);
+  const [lifeSparkData, setLifeSparkData] = useState<LifeSparkData>(emptyLifeSparkData);
+  const [lifeSparkResult, setLifeSparkResult] = useState<LifeSparkItem | null>(null);
+  const [lifeSparkView, setLifeSparkView] = useState<"wheel" | "favorites" | "tried">("wheel");
+  const [lifeSparkSpinning, setLifeSparkSpinning] = useState(false);
+  const [lifeSparkRotation, setLifeSparkRotation] = useState(0);
+  const [lifeSparkSpinDuration, setLifeSparkSpinDuration] = useState(1450);
+  const [todayScrollTop, setTodayScrollTop] = useState(0);
   const [day, setDay] = useState(8);
   const [checkins, setCheckins] = useState<Checkin[]>(() =>
     getTasks("21", 8).map((task, index) => ({ ...task, done: index < 2 }))
@@ -122,6 +211,8 @@ export default function HuixuApp() {
   const [recordFilter, setRecordFilter] = useState<"all" | "counted" | "not-counted">("all");
   const [recordMonthCursor, setRecordMonthCursor] = useState(() => localDateKey(new Date()).slice(0, 7));
   const [undoUntil, setUndoUntil] = useState(0);
+  const [pausedAt, setPausedAt] = useState("");
+  const [pausedDays, setPausedDays] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [endingOpen, setEndingOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState<ChallengeArchive | null>(null);
@@ -138,6 +229,7 @@ export default function HuixuApp() {
   const [routesFromApp, setRoutesFromApp] = useState(false);
   const [supplementText, setSupplementText] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
+  const lifeSparkTimerRef = useRef<number>(0);
 
   useEffect(() => {
     let active = true;
@@ -148,21 +240,33 @@ export default function HuixuApp() {
         if (raw && active) {
           const saved = JSON.parse(raw);
           const savedRoute: RouteKey = saved.route ?? "21";
+          const savedChallengeType: ChallengeType = saved.challengeType === "custom" && saved.customConfig ? "custom" : "fixed";
           const savedHistory: DailyRecord[] = saved.history ?? [];
           const savedDay = saved.day ?? 1;
+          const migratedPausedDays = saved.lifecycle === "paused" && saved.startedAt
+            ? Math.max(0, calendarDayDifference(saved.startedAt, new Date()) - (savedDay - 1))
+            : 0;
+          const savedPausedDays = Math.max(0, saved.pausedDays ?? saved.customConfig?.pausedDays ?? migratedPausedDays);
+          const savedPausedAt = saved.lifecycle === "paused" ? saved.pausedAt || todayKey() : "";
+          const savedCustomConfig: CustomChallengeConfig | null = savedChallengeType === "custom"
+            ? { ...saved.customConfig, pausedDays: savedPausedDays }
+            : null;
           const canAdvanceByDate = saved.lifecycle === "active" && saved.startedAt;
-          const elapsed = canAdvanceByDate ? calendarDayDifference(saved.startedAt, new Date()) : 0;
-          const targetDay = Math.min(routeInfo[savedRoute].days, Math.max(savedDay, elapsed + 1));
-          const crossedDay = targetDay > savedDay;
-          const savedCheckins: Checkin[] = saved.checkins ?? getTasks(savedRoute, savedDay).map((task) => ({ ...task, done: false }));
+          const elapsed = canAdvanceByDate ? challengeElapsedDays(saved.startedAt, new Date(), savedPausedDays) : 0;
+          const maxDays = challengeTotalDays(savedChallengeType, savedRoute, savedCustomConfig);
+          const targetDay = Math.min(maxDays, Math.max(savedDay, elapsed + 1));
+          const endedByDate = Boolean(canAdvanceByDate && challengeHasEnded(saved.startedAt, new Date(), savedPausedDays, maxDays));
+          const crossedDay = targetDay > savedDay || endedByDate;
+          const savedCheckins: Checkin[] = saved.checkins ?? tasksForChallengeDay(savedChallengeType, savedRoute, savedCustomConfig, savedDay).map((task) => ({ ...task, done: false }));
           const savedDoneIds = savedCheckins.filter((item) => item.done).map((item) => item.id);
           const savedHasContent = savedDoneIds.length > 0 || Boolean(saved.note?.trim()) || Object.keys(saved.taskNotes ?? {}).length > 0 || (saved.skippedIds ?? []).length > 0;
-          const savedResult = getDayStatus(savedRoute, savedDoneIds, savedDay);
-          const missed = crossedDay ? Array.from({ length: targetDay - savedDay }, (_, index) => savedDay + index)
+          const savedResult = statusForChallengeDay(savedChallengeType, savedRoute, savedCustomConfig, savedCheckins, savedDoneIds, savedDay);
+          const lastDayToRecord = endedByDate ? maxDays : targetDay - 1;
+          const missed = crossedDay && lastDayToRecord >= savedDay ? Array.from({ length: lastDayToRecord - savedDay + 1 }, (_, index) => savedDay + index)
             .filter((missedDay) => !savedHistory.some((record) => record.day === missedDay))
             .map((missedDay) => {
               const recordDate = new Date(saved.startedAt);
-              recordDate.setDate(recordDate.getDate() + missedDay - 1);
+              recordDate.setDate(recordDate.getDate() + missedDay - 1 + savedPausedDays);
               const isCurrentSavedDay = missedDay === savedDay;
               if (isCurrentSavedDay && savedHasContent) {
                 return {
@@ -174,44 +278,85 @@ export default function HuixuApp() {
                   doneIds: savedDoneIds,
                   skippedIds: savedCheckins.filter((item) => !item.done).map((item) => item.id),
                   note: saved.note ?? "",
-                  stage: getStageLabel(savedRoute, missedDay),
+                  stage: stageForChallengeDay(savedChallengeType, savedRoute, missedDay),
                   taskNotes: saved.taskNotes ?? {},
+                  completedAt: recordDate.toISOString(),
                   tasks: savedCheckins.map(({ done: _done, ...task }) => task),
                   rulesVersion: saved.challengeRulesVersion ?? 1,
+                  scheduledTaskIds: savedCheckins.map((task) => task.id),
+                  completedTaskIds: savedDoneIds,
+                  totalTaskCount: savedCheckins.length,
+                  completedTaskCount: savedDoneIds.length,
+                  requiredCompletedCount: savedChallengeType === "custom" ? customRequiredCount(savedCheckins.length, savedCustomConfig?.dailyThresholdRule.allowedMisses ?? 0) : undefined,
+                  dayStatus: savedChallengeType === "custom" ? savedResult.key as DailyRecord["dayStatus"] : undefined,
                 } satisfies DailyRecord;
               }
+              const missedTasks = tasksForChallengeDay(savedChallengeType, savedRoute, savedCustomConfig, missedDay);
               return {
                 day: missedDay,
                 date: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(recordDate),
-                status: "未记录",
-                statusKey: "unrecorded",
+                status: savedChallengeType === "custom" ? "未达标日" : "未记录",
+                statusKey: savedChallengeType === "custom" ? "failed" : "unrecorded",
                 counted: false,
                 doneIds: [],
                 note: "",
-                stage: getStageLabel(savedRoute, missedDay),
-                tasks: isCurrentSavedDay ? savedCheckins.map(({ done: _done, ...task }) => task) : getTasks(savedRoute, missedDay),
+                completedAt: recordDate.toISOString(),
+                stage: stageForChallengeDay(savedChallengeType, savedRoute, missedDay),
+                tasks: isCurrentSavedDay ? savedCheckins.map(({ done: _done, ...task }) => task) : missedTasks,
+                scheduledTaskIds: missedTasks.map((task) => task.id),
+                completedTaskIds: [],
+                totalTaskCount: missedTasks.length,
+                completedTaskCount: 0,
+                requiredCompletedCount: savedChallengeType === "custom" ? customRequiredCount(missedTasks.length, savedCustomConfig?.dailyThresholdRule.allowedMisses ?? 0) : undefined,
+                dayStatus: savedChallengeType === "custom" ? "failed" : undefined,
               } satisfies DailyRecord;
             }) : [];
+          const completedHistory = [...savedHistory, ...missed].sort((a, b) => a.day - b.day);
+          const finishedCustomConfig = endedByDate && savedCustomConfig
+            ? { ...savedCustomConfig, currentDay: targetDay, challengeStatus: "finished" as const, updatedAt: new Date().toISOString() }
+            : savedCustomConfig;
+          const savedArchives: ChallengeArchive[] = saved.archives ?? [];
+          const completedArchives = endedByDate && saved.challengeId
+            ? [{
+                id: saved.challengeId,
+                route: savedRoute,
+                status: "finished" as const,
+                startedAt: saved.startedAt,
+                endedAt: new Date().toISOString(),
+                history: completedHistory,
+                settings: saved.challengeSettings ?? { wakeStart: "08:00", wakeEnd: "09:00" },
+                rulesVersion: saved.challengeRulesVersion ?? 1,
+                challengeType: savedChallengeType,
+                customConfig: finishedCustomConfig,
+              }, ...savedArchives.filter((item) => item.id !== saved.challengeId)]
+            : savedArchives;
           setScreen(saved.screen ?? "welcome");
           setRoute(savedRoute);
+          setChallengeType(savedChallengeType);
+          setCustomConfig(finishedCustomConfig);
           setDay(targetDay);
-          setCheckins(crossedDay ? getTasks(savedRoute, targetDay).map((task) => ({ ...task, done: false })) : saved.checkins ?? getTasks(savedRoute, targetDay).map((task) => ({ ...task, done: false })));
+          setCheckins(crossedDay ? tasksForChallengeDay(savedChallengeType, savedRoute, savedCustomConfig, targetDay).map((task) => ({ ...task, done: false })) : saved.checkins ?? tasksForChallengeDay(savedChallengeType, savedRoute, savedCustomConfig, targetDay).map((task) => ({ ...task, done: false })));
           setNote(crossedDay ? "" : saved.note ?? "");
           setTaskNotes(crossedDay ? {} : saved.taskNotes ?? {});
           setSkippedIds(crossedDay ? [] : saved.skippedIds ?? []);
           setSettled(crossedDay ? false : saved.settled ?? false);
-          setLifecycle(saved.lifecycle ?? "active");
-          setHistory([...savedHistory, ...missed].sort((a, b) => a.day - b.day));
+          setLifecycle(endedByDate ? "finished" : saved.lifecycle ?? "active");
+          setHistory(completedHistory);
           setStartedAt(saved.startedAt ?? "");
           setReminder(saved.reminder ?? { morning: "08:00", evening: "22:30", enabled: false });
           setChallengeSettings(saved.challengeSettings ?? { wakeStart: "08:00", wakeEnd: "09:00" });
           setScheduledDate(saved.scheduledDate ?? "");
           setChallengeId(saved.challengeId ?? "");
-          setArchives(saved.archives ?? []);
+          setArchives(completedArchives);
+          setPausedAt(endedByDate ? "" : savedPausedAt);
+          setPausedDays(savedPausedDays);
           setChallengeRulesVersion(saved.challengeRulesVersion ?? 1);
           setAnalyticsConsent(saved.analyticsConsent ?? "pending");
           setAnalyticsPromptSeen(saved.analyticsPromptSeen ?? false);
           setUndoUntil(crossedDay ? 0 : saved.undoUntil ?? 0);
+          setCustomDraft(saved.customDraft ?? defaultCustomDraft());
+          setCustomStep(Math.min(4, Math.max(1, saved.customStep ?? 1)));
+          setLifeSparkData({ ...emptyLifeSparkData, ...(saved.lifeSparkData ?? {}) });
         }
       } finally {
         if (active) setHydrated(true);
@@ -222,17 +367,35 @@ export default function HuixuApp() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const state = { screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, schemaVersion: 4 };
+    const state = { screen, route, challengeType, customConfig, customDraft, customStep, lifeSparkData, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, pausedAt, pausedDays, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, schemaVersion: 7 };
     localStorage.setItem(storageKey, JSON.stringify(state));
     void writeIndexedState(state);
-  }, [screen, route, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, hydrated]);
+  }, [screen, route, challengeType, customConfig, customDraft, customStep, lifeSparkData, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, pausedAt, pausedDays, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, hydrated]);
+
+  useEffect(() => () => window.clearTimeout(lifeSparkTimerRef.current), []);
 
   useEffect(() => {
-    if (!hydrated || lifecycle !== "active" || !startedAt || day >= routeInfo[route].days) return;
+    if (!hydrated || lifecycle !== "preparing" || !scheduledDate || todayKey() < scheduledDate) return;
+    const start = new Date(`${scheduledDate}T00:00:00`).toISOString();
+    setStartedAt(start);
+    setLifecycle("active");
+    if (customConfig) setCustomConfig({ ...customConfig, challengeStatus: "active", updatedAt: new Date().toISOString() });
+  }, [hydrated, lifecycle, scheduledDate, customConfig]);
+
+  useEffect(() => {
+    if (challengeType !== "custom" || !customConfig) return;
+    if (customConfig.currentDay === day && customConfig.challengeStatus === lifecycle) return;
+    setCustomConfig({ ...customConfig, currentDay: day, challengeStatus: lifecycle, updatedAt: new Date().toISOString() });
+  }, [challengeType, customConfig, day, lifecycle]);
+
+  useEffect(() => {
+    const totalDays = challengeTotalDays(challengeType, route, customConfig);
+    if (!hydrated || lifecycle !== "active" || !startedAt) return;
     let timer = 0;
     const advanceWhenDateChanges = () => {
-      const expectedDay = Math.min(routeInfo[route].days, calendarDayDifference(startedAt, new Date()) + 1);
-      if (expectedDay > day) {
+      const elapsedDays = challengeElapsedDays(startedAt, new Date(), pausedDays);
+      const expectedDay = Math.min(totalDays, elapsedDays + 1);
+      if (expectedDay > day || elapsedDays >= totalDays) {
         window.location.reload();
         return true;
       }
@@ -254,7 +417,7 @@ export default function HuixuApp() {
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);
     };
-  }, [hydrated, lifecycle, startedAt, day, route]);
+  }, [hydrated, lifecycle, startedAt, pausedDays, day, route, challengeType, customConfig]);
 
   useEffect(() => {
     if (!undoUntil || undoUntil <= Date.now()) return;
@@ -340,12 +503,14 @@ export default function HuixuApp() {
   const completed = useMemo(() => checkins.filter((item) => item.done).length, [checkins]);
   const baseCompleted = useMemo(() => checkins.filter((item) => item.category === "base" && item.done).length, [checkins]);
   const optionalTodayCompleted = useMemo(() => checkins.filter((item) => item.category === "optional" && item.done).length, [checkins]);
-  const todayCompleted = route === "50" ? baseCompleted : completed;
-  const todayTotal = route === "50" ? 5 : checkins.length;
-  const currentRoute = routeInfo[route];
+  const todayCompleted = challengeType === "fixed" && route === "50" ? baseCompleted : completed;
+  const todayTotal = challengeType === "custom" ? checkins.length : route === "50" ? 5 : checkins.length;
+  const currentRoute = challengeType === "custom"
+    ? { days: challengeTotalDays(challengeType, route, customConfig), name: challengeDisplayName(challengeType, route, customConfig), label: "自定义挑战", description: "按自己设置的生活节律完成挑战。", structure: `${customConfig?.selectedTasks.length ?? 0} 项自定义任务`, target: "走完设定周期，完成日与达标日都会计入累计达标" }
+    : routeInfo[route];
   const dayStatus = useMemo(
-    () => getDayStatus(route, checkins.filter((item) => item.done).map((item) => item.id), day),
-    [route, checkins, day]
+    () => statusForChallengeDay(challengeType, route, customConfig, checkins, checkins.filter((item) => item.done).map((item) => item.id), day),
+    [challengeType, route, customConfig, checkins, day]
   );
   const countedDays = history.filter((record) => record.counted).length;
   const completionRate = history.length ? Math.round((countedDays / history.length) * 100) : 0;
@@ -365,7 +530,7 @@ export default function HuixuApp() {
     : route === "21" && challengeRulesVersion < 2
       ? Boolean(taskNotes["rotation-prepare"]?.trim())
       : true;
-  const challengePassed = route === "7"
+  const challengePassed = challengeType === "custom" ? true : route === "7"
     ? countedDays >= 5 && history.some((record) => record.day === 7 && record.doneIds.includes("clear-card") && record.taskNotes?.["clear-card"]?.trim())
     : route === "21"
       ? countedDays >= 15 && additionalCount >= 15
@@ -507,7 +672,7 @@ export default function HuixuApp() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `回序备份-${new Date().toISOString().slice(0, 10)}.huixu`;
+    anchor.download = `回序备份-${todayKey()}.huixu`;
     anchor.click();
     URL.revokeObjectURL(url);
     showToast("备份文件已生成");
@@ -533,32 +698,33 @@ export default function HuixuApp() {
       "",
       ...history.flatMap((record) => [
         `## ${record.date} · DAY ${String(record.day).padStart(2, "0")} · ${record.status}`,
-        ...((record.tasks ?? getTasks(route, record.day)).map((task) => `- ${record.doneIds.includes(task.id) ? "已完成" : "未完成"}｜${task.name}${record.taskNotes?.[task.id] ? `：${record.taskNotes[task.id]}` : ""}`)),
+        ...((record.tasks ?? tasksForChallengeDay(challengeType, route, customConfig, record.day)).map((task) => `- ${record.doneIds.includes(task.id) ? "已完成" : "未完成"}｜${task.name}${task.detail ? `｜${task.detail}` : ""}${record.taskNotes?.[task.id] ? `：${record.taskNotes[task.id]}` : ""}`)),
         record.note ? `\n> ${record.note}` : "",
         "",
       ]),
     ];
-    downloadMarkdown(lines, `回序记录-${new Date().toISOString().slice(0, 10)}.md`);
+    downloadMarkdown(lines, `回序记录-${todayKey()}.md`);
     showToast("阅读导出已生成");
     trackAnonymousEvent("markdown_exported", { route });
   }
 
   function exportArchiveMarkdown(archive: ChallengeArchive) {
-    const info = routeInfo[archive.route];
+    const archiveType = archive.challengeType === "custom" ? "custom" : "fixed";
+    const archiveName = challengeDisplayName(archiveType, archive.route, archive.customConfig ?? null);
     const lines = [
-      `# 回序 · ${info.name}`,
+      `# 回序 · ${archiveName}`,
       "",
       `挑战时间：${new Date(archive.startedAt).toLocaleDateString("zh-CN")} — ${new Date(archive.endedAt).toLocaleDateString("zh-CN")}`,
       `挑战结果：${archive.status === "finished" ? "自然结束" : archive.status === "ended" ? "提前结束" : "已归档"}`,
       "",
       ...archive.history.flatMap((record) => [
         `## ${record.date} · DAY ${String(record.day).padStart(2, "0")} · ${record.status}`,
-        ...((record.tasks ?? getTasks(archive.route, record.day)).map((task) => `- ${record.doneIds.includes(task.id) ? "已完成" : "未完成"}｜${task.name}${record.taskNotes?.[task.id] ? `：${record.taskNotes[task.id]}` : ""}`)),
+        ...((record.tasks ?? tasksForChallengeDay(archiveType, archive.route, archive.customConfig ?? null, record.day)).map((task) => `- ${record.doneIds.includes(task.id) ? "已完成" : "未完成"}｜${task.name}${task.detail ? `｜${task.detail}` : ""}${record.taskNotes?.[task.id] ? `：${record.taskNotes[task.id]}` : ""}`)),
         record.note ? `\n> ${record.note}` : "",
         "",
       ]),
     ];
-    downloadMarkdown(lines, `回序-${info.name}-${archive.startedAt.slice(0, 10)}.md`);
+    downloadMarkdown(lines, `回序-${archiveName}-${archive.startedAt.slice(0, 10)}.md`);
     showToast("历史挑战 Markdown 已生成");
   }
 
@@ -592,6 +758,8 @@ export default function HuixuApp() {
       history,
       settings: challengeSettings,
       rulesVersion: challengeRulesVersion,
+      challengeType,
+      customConfig,
     }, ...items.filter((item) => item.id !== challengeId)]);
   }
 
@@ -603,11 +771,11 @@ export default function HuixuApp() {
       }
       archiveCurrent("ended");
     } else if (history.length || startedAt) archiveCurrent(lifecycle);
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
     const effectiveStart = startChoice;
-    const scheduled = effectiveStart === "tomorrow" ? tomorrow.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const scheduled = effectiveStart === "tomorrow" ? dateKeyAfter(new Date(), 1) : todayKey();
     setRoute(key);
+    setChallengeType("fixed");
+    setCustomConfig(null);
     setChallengeRulesVersion(rulesVersion);
     setChallengeId(`hx-${Date.now()}-${key}`);
     setScheduledDate(scheduled);
@@ -619,12 +787,124 @@ export default function HuixuApp() {
     setSettled(false);
     setLifecycle(effectiveStart === "tomorrow" ? "preparing" : "active");
     setHistory([]);
+    setPausedAt("");
+    setPausedDays(0);
     setOptionalOpen(false);
     setStartedAt(effectiveStart === "today" ? new Date().toISOString() : "");
     setTab("today");
     setScreen("app");
     setRoutesFromApp(false);
     trackAnonymousEvent("challenge_started", { route: key, rulesVersion });
+  }
+
+  function prepareCustomChallenge() {
+    const draft = defaultCustomDraft();
+    setCustomDraft(draft);
+    setCustomStep(1);
+    setCustomSource("library");
+    setCustomOpenGroup("照顾身体");
+    setScreen("custom-builder");
+  }
+
+  function toggleCustomTask(template: CustomTask) {
+    setCustomDraft((draft) => {
+      const existing = draft.selectedTasks.find((task) => task.dedupeKey === template.dedupeKey);
+      if (existing) return { ...draft, selectedTasks: draft.selectedTasks.filter((task) => task.dedupeKey !== template.dedupeKey) };
+      return { ...draft, selectedTasks: [...draft.selectedTasks, { ...template, taskId: `custom-${template.dedupeKey}`, createdAt: new Date().toISOString() }] };
+    });
+  }
+
+  function selectAllCustomTasks(templates: CustomTask[]) {
+    setCustomDraft((draft) => {
+      const next = [...draft.selectedTasks];
+      templates.forEach((template) => {
+        if (!next.some((task) => task.dedupeKey === template.dedupeKey)) next.push({ ...template, taskId: `custom-${template.dedupeKey}`, createdAt: new Date().toISOString() });
+      });
+      return { ...draft, selectedTasks: next };
+    });
+  }
+
+  function updateSelectedCustomTask(taskId: string, update: Partial<CustomTask>) {
+    setCustomDraft((draft) => ({ ...draft, selectedTasks: draft.selectedTasks.map((task) => task.taskId === taskId ? { ...task, ...update } : task) }));
+  }
+
+  function addUserCustomTask() {
+    const title = customUserTask.title.trim();
+    if (!title) return showToast("请先填写任务名称");
+    const dedupeKey = `user-${title.toLowerCase()}`;
+    if (customDraft.selectedTasks.some((task) => task.dedupeKey === dedupeKey || task.title === title)) return showToast("这项任务已经添加过了");
+    const task: CustomTask = {
+      taskId: `custom-user-${Date.now()}`,
+      source: "user",
+      category: "我的任务",
+      title,
+      userGoal: customUserTask.userGoal.trim(),
+      rhythmType: customUserTask.rhythmType,
+      selectedWeekdays: customUserTask.selectedWeekdays,
+      createdAt: new Date().toISOString(),
+      description: "这是你为本轮挑战添加的一项个人行动。",
+      suggestion: "从当前容易完成的版本开始，重点是稳定重复，不需要一次做到很多。",
+      goalExamples: "例如：20分钟／完成一个小步骤",
+      icon: "✦",
+      tone: "blend",
+      dedupeKey,
+    };
+    setCustomDraft((draft) => ({ ...draft, selectedTasks: [...draft.selectedTasks, task] }));
+    setCustomUserTask({ title: "", userGoal: "", rhythmType: "daily", selectedWeekdays: [] });
+    setCustomUserTaskOpen(false);
+  }
+
+  function customBuilderNext() {
+    if (customStep === 1) {
+      const days = Math.round(customDraft.durationDays);
+      if (days < 3 || days > 50) return showToast("自定义挑战需要持续3—50天");
+      if (customDraft.startDate < todayKey()) return showToast("开始日期不能早于今天");
+    }
+    if (customStep === 2 && customDraft.selectedTasks.length === 0) return showToast("请至少选择一项挑战");
+    if (customStep === 3) {
+      if (!customDraft.selectedTasks.some((task) => task.rhythmType === "daily")) return showToast("请至少设置一项每天执行的挑战");
+      if (customDraft.selectedTasks.some((task) => task.rhythmType === "weekly" && task.selectedWeekdays.length === 0)) return showToast("请为每周任务选择星期");
+    }
+    setCustomStep((step) => Math.min(4, step + 1));
+  }
+
+  function createCustomChallenge() {
+    if (!customDraft.selectedTasks.some((task) => task.rhythmType === "daily")) return showToast("请至少保留一项每天执行的挑战");
+    if (routesFromApp && (history.length || startedAt)) {
+      if (!window.confirm("开启自定义挑战会结束并归档当前挑战。是否继续？")) { setScreen("app"); return; }
+      archiveCurrent("ended");
+    } else if (history.length || startedAt) archiveCurrent(lifecycle);
+    const createdAt = new Date().toISOString();
+    const id = `hx-${Date.now()}-custom`;
+    const name = customDraft.challengeName.trim() || "我的生活重启挑战";
+    const allowedMisses = Math.min(Math.max(0, customDraft.selectedTasks.length - 1), customDraft.allowedMisses);
+    const config: CustomChallengeConfig = {
+      challengeId: id,
+      challengeType: "custom",
+      challengeName: name,
+      startDate: customDraft.startDate,
+      endDate: endDateFor(customDraft.startDate, customDraft.durationDays),
+      durationDays: customDraft.durationDays,
+      pausedDays: 0,
+      selectedTasks: customDraft.selectedTasks,
+      dailyThresholdRule: { type: "allowed_misses", allowedMisses },
+      createdAt,
+      updatedAt: createdAt,
+      currentDay: 1,
+      challengeStatus: customDraft.startDate === todayKey() ? "active" : "preparing",
+    };
+    setChallengeType("custom");
+    setCustomConfig(config);
+    setChallengeId(id);
+    setScheduledDate(customDraft.startDate);
+    setDay(1);
+    setCheckins(tasksForChallengeDay("custom", route, config, 1).map((task) => ({ ...task, done: false })));
+    setNote(""); setTaskNotes({}); setSkippedIds([]); setSettled(false); setHistory([]); setOptionalOpen(false);
+    setPausedAt(""); setPausedDays(0);
+    setLifecycle(config.challengeStatus);
+    setStartedAt(config.challengeStatus === "active" ? new Date().toISOString() : "");
+    setTab("today"); setScreen("app"); setRoutesFromApp(false);
+    trackAnonymousEvent("challenge_started", { route: "custom", duration: config.durationDays, tasks: config.selectedTasks.length });
   }
 
   function toggleCheckin(id: string) {
@@ -653,33 +933,41 @@ export default function HuixuApp() {
   }
 
   function settleToday() {
-    if (((route === "7" && day === 7) || (route === "21" && day === 21)) && !finalRequiredDone) {
+    if (challengeType === "fixed" && ((route === "7" && day === 7) || (route === "21" && day === 21)) && !finalRequiredDone) {
       showToast(route === "7" ? "请先写下你的回序卡" : "请先写下你的生活节奏卡");
       return;
     }
     const unanswered = checkins.filter((item) => !item.done && !skippedIds.includes(item.id));
     if (unanswered.length && !window.confirm(`还有 ${unanswered.length} 项没有选择。继续结算会将它们记录为“今天未完成”，是否继续？`)) return;
     const finalSkipped = [...new Set([...skippedIds, ...unanswered.map((item) => item.id)])];
-    const result = getDayStatus(route, checkins.filter((item) => item.done).map((item) => item.id), day);
+    const doneIds = checkins.filter((item) => item.done).map((item) => item.id);
+    const result = statusForChallengeDay(challengeType, route, customConfig, checkins, doneIds, day);
+    const required = challengeType === "custom" ? customRequiredCount(checkins.length, customConfig?.dailyThresholdRule.allowedMisses ?? 0) : undefined;
     const record: DailyRecord = {
       day,
       date: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date()),
       status: result.label,
       statusKey: result.key,
       counted: result.counted,
-      doneIds: checkins.filter((item) => item.done).map((item) => item.id),
+      doneIds,
       skippedIds: finalSkipped,
       note,
-      stage: getStageLabel(route, day),
+      stage: stageForChallengeDay(challengeType, route, day),
       taskNotes,
       completedAt: new Date().toISOString(),
       tasks: checkins.map(({ done: _done, ...task }) => task),
       rulesVersion: challengeRulesVersion,
+      scheduledTaskIds: checkins.map((task) => task.id),
+      completedTaskIds: doneIds,
+      totalTaskCount: checkins.length,
+      completedTaskCount: doneIds.length,
+      requiredCompletedCount: required,
+      dayStatus: challengeType === "custom" ? result.key as DailyRecord["dayStatus"] : undefined,
     };
     setHistory((records) => [...records.filter((item) => item.day !== day), record].sort((a, b) => a.day - b.day));
     setSettled(true);
     setUndoUntil(Date.now() + 10 * 60 * 1000);
-    trackAnonymousEvent("day_settled", { route, day, result: result.key });
+    trackAnonymousEvent("day_settled", { route: challengeType === "custom" ? "custom" : route, day, result: result.key });
   }
 
   function advanceDay() {
@@ -691,7 +979,7 @@ export default function HuixuApp() {
     }
     const next = day + 1;
     setDay(next);
-    setCheckins(configuredTasks(route, next).map((item) => ({ ...item, done: false })));
+    setCheckins((challengeType === "custom" ? tasksForChallengeDay("custom", route, customConfig, next) : configuredTasks(route, next)).map((item) => ({ ...item, done: false })));
     setNote("");
     setTaskNotes({});
     setSkippedIds([]);
@@ -709,7 +997,29 @@ export default function HuixuApp() {
   function beginPreparedChallenge() {
     setLifecycle("active");
     setStartedAt(new Date().toISOString());
-    setScheduledDate(new Date().toISOString().slice(0, 10));
+    setScheduledDate(todayKey());
+    setPausedAt("");
+    setPausedDays(0);
+    if (customConfig) setCustomConfig({ ...customConfig, startDate: todayKey(), endDate: endDateFor(todayKey(), customConfig.durationDays), pausedDays: 0, challengeStatus: "active", updatedAt: new Date().toISOString() });
+  }
+
+  function pauseChallenge() {
+    setPausedAt(todayKey());
+    setLifecycle("paused");
+  }
+
+  function resumeChallenge() {
+    const nextPausedDays = pausedDaysAfterResume(pausedDays, pausedAt, new Date());
+    setPausedDays(nextPausedDays);
+    setPausedAt("");
+    if (customConfig) setCustomConfig({
+      ...customConfig,
+      pausedDays: nextPausedDays,
+      endDate: endDateFor(customConfig.startDate, customConfig.durationDays + nextPausedDays),
+      challengeStatus: "active",
+      updatedAt: new Date().toISOString(),
+    });
+    setLifecycle("active");
   }
 
   function endChallengeEarly() {
@@ -728,21 +1038,94 @@ export default function HuixuApp() {
     showToast("补记已保存，原结果没有改变");
   }
 
+  function openLifeSpark(event: ReactMouseEvent<HTMLElement>) {
+    const scrollContainer = event.currentTarget.closest(`.${styles.screenContent}`);
+    setTodayScrollTop(scrollContainer?.scrollTop ?? 0);
+    setLifeSparkView("wheel");
+    setLifeSparkResult(null);
+    setScreen("life-spark");
+  }
+
+  function closeLifeSpark() {
+    window.clearTimeout(lifeSparkTimerRef.current);
+    setLifeSparkSpinning(false);
+    setLifeSparkResult(null);
+    setScreen("app");
+    setTab("today");
+    window.requestAnimationFrame(() => {
+      const scrollContainer = document.querySelector(`.${styles.screenContent}`);
+      if (scrollContainer instanceof HTMLElement) scrollContainer.scrollTop = todayScrollTop;
+    });
+  }
+
+  function runLifeSparkDraw(short = false) {
+    if (lifeSparkSpinning) return;
+    const item = drawLifeSpark(lifeSparkData);
+    const categoryIndex = Math.max(0, lifeSparkCategories.findIndex((category) => category.category === item.category));
+    const target = (360 - categoryIndex * 36) % 360;
+    setLifeSparkSpinning(true);
+    setLifeSparkSpinDuration(short ? 720 : 1450);
+    setLifeSparkResult(null);
+    setLifeSparkRotation((current) => current + (short ? 720 : 1440) + ((target - (current % 360) + 360) % 360));
+    setLifeSparkData((data) => ({
+      ...data,
+      lastDrawnItemId: item.id,
+      recentDraws: [item.id, ...data.recentDraws.filter((id) => id !== item.id)].slice(0, 8),
+    }));
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const duration = reducedMotion ? 0 : short ? 720 : 1450;
+    window.clearTimeout(lifeSparkTimerRef.current);
+    lifeSparkTimerRef.current = window.setTimeout(() => {
+      setLifeSparkResult(item);
+      setLifeSparkSpinning(false);
+    }, duration);
+  }
+
+  function toggleLifeSparkFavorite(itemId: string) {
+    setLifeSparkData((data) => ({
+      ...data,
+      favorites: data.favorites.includes(itemId) ? data.favorites.filter((id) => id !== itemId) : [itemId, ...data.favorites],
+    }));
+  }
+
+  function markLifeSparkTried(itemId: string) {
+    const triedAt = new Date().toISOString();
+    setLifeSparkData((data) => ({
+      ...data,
+      triedItems: [{ itemId, triedAt }, ...data.triedItems.filter((item) => item.itemId !== itemId)],
+    }));
+    showToast("已记下，去试试看吧");
+  }
+
+  function renderLifeSparkEntry() {
+    return (
+      <button className={styles.lifeSparkEntry} onClick={openLifeSpark}>
+        <span className={styles.lifeSparkEntryIcon}>✦</span>
+        <b>给生活加一点？</b>
+        <i>打开生活盲盒&nbsp; ›</i>
+      </button>
+    );
+  }
+
   function renderTaskCard(item: Checkin, compact = false) {
     return (
-      <button
+      <div
         key={item.id}
         className={`${styles.checkinPanel} ${styles[item.tone]} ${item.done ? styles.checked : ""} ${skippedIds.includes(item.id) ? styles.skipped : ""} ${compact ? styles.compactChallenge : ""}`}
         onClick={() => toggleCheckin(item.id)}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleCheckin(item.id); }
+        }}
+        role="button"
+        tabIndex={0}
         aria-pressed={item.done}
       >
         <span className={styles.checkinIcon}>{item.icon}</span>
         <span className={styles.checkinText}><b>{item.name}</b><small>{item.detail}</small></span>
         <span className={styles.checkCircle}>{item.done ? "✓" : skippedIds.includes(item.id) ? "—" : ""}</span>
-        <span className={styles.infoButton} role="button" tabIndex={0} aria-label={`查看${item.name}说明`} onClick={(event) => { event.stopPropagation(); setDetailTask(item); }} onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); setDetailTask(item); }
-        }}>···</span>
-      </button>
+        <button type="button" className={styles.infoButton} aria-label={`查看${item.name}说明`} onClick={(event) => { event.stopPropagation(); setDetailTask(item); }} onKeyDown={(event) => event.stopPropagation()}>···</button>
+      </div>
     );
   }
 
@@ -788,7 +1171,7 @@ export default function HuixuApp() {
         <section className={`${styles.phoneShell} ${styles.routeShell}`}>
           <header className={styles.pageHeader}>
             <button className={styles.iconButton} onClick={() => setScreen(routesFromApp ? "app" : "welcome")} aria-label="返回">‹</button>
-            <div><h1 className={styles.routePageTitle}>选择适合现在的路线</h1></div>
+            <div><h1 className={styles.compactPageTitle}>选择适合现在的路线</h1></div>
           </header>
           {routesFromApp && <p className={styles.routeWarning}>你当前的挑战仍会保留。建议先完成或结束当前挑战，再开启新的路线。</p>}
           <div className={styles.routeList}>
@@ -822,6 +1205,23 @@ export default function HuixuApp() {
                 </article>
               );
             })}
+            <article className={`${styles.routeCard} ${styles.routeCustom}`}>
+              <div className={styles.routeNumber}>04</div>
+              <div className={styles.routeMeta}>
+                <span>3—50 DAYS</span>
+                <h2>自定义挑战</h2>
+                <h3>适合：希望按自己的生活状态安排挑战内容</h3>
+                <p>自由选择挑战项目和生活节律，建立适合自己的稳定生活系统。</p>
+                <small>自选周期＋自选任务＋三种生活节律</small>
+                <em>完成方式：走完设定周期，每天按实际任务数量判断达标</em>
+                <details className={styles.routeDetails}>
+                  <summary>查看具体创建内容与规则</summary>
+                  <section><b>你可以设置</b><ul><li>3—50天挑战周期和开始日期</li><li>从三条路线或系统题库选择项目</li><li>为每项任务填写目标并设置生活节律</li><li>用“允许未完成几项”设置每日容错</li></ul></section>
+                  <section><b>完成规则</b><ol><li>当天全部任务完成，记为完成日。</li><li>达到当天自动换算的门槛，记为达标日。</li><li>走完设定周期后挑战结束，不设置整轮成功或失败。</li></ol></section>
+                </details>
+              </div>
+              <button onClick={prepareCustomChallenge} aria-label="开始自定义挑战">开始自定义</button>
+            </article>
           </div>
           <button className={styles.recommendButton} onClick={() => {
             setAssessmentStep(0);
@@ -887,7 +1287,7 @@ export default function HuixuApp() {
         <section className={`${styles.phoneShell} ${styles.setupShell}`}>
           <header className={styles.pageHeader}>
             <button className={styles.iconButton} onClick={() => setScreen("routes")} aria-label="返回">‹</button>
-            <div><h1>开始前设置</h1></div>
+            <div><h1 className={styles.compactPageTitle}>开始前设置</h1></div>
           </header>
           <section className={styles.setupRoute}>
             <small>{selected.days} DAYS</small>
@@ -931,6 +1331,167 @@ export default function HuixuApp() {
     );
   }
 
+  if (screen === "custom-builder") {
+    const weekdayLabels = [[1, "一"], [2, "二"], [3, "三"], [4, "四"], [5, "五"], [6, "六"], [0, "日"]] as const;
+    const selectedKeys = new Set(customDraft.selectedTasks.map((task) => task.dedupeKey));
+    const previewDays = Array.from({ length: Math.min(7, customDraft.durationDays) }, (_, index) => {
+      const previewConfig: CustomChallengeConfig = {
+        challengeId: "preview", challengeType: "custom", challengeName: customDraft.challengeName || "我的生活重启挑战",
+        startDate: customDraft.startDate, endDate: endDateFor(customDraft.startDate, customDraft.durationDays), durationDays: customDraft.durationDays,
+        selectedTasks: customDraft.selectedTasks, dailyThresholdRule: { type: "allowed_misses", allowedMisses: customDraft.allowedMisses },
+        createdAt: "", updatedAt: "", currentDay: 1, challengeStatus: "preparing",
+      };
+      const date = dateForChallengeDay(customDraft.startDate, index + 1);
+      return { day: index + 1, total: scheduledCustomTasks(previewConfig, index + 1, date).length };
+    });
+    return (
+      <main className={styles.centerStage}>
+        <section className={`${styles.phoneShell} ${styles.setupShell}`}>
+          <header className={styles.pageHeader}>
+            <button className={styles.iconButton} onClick={() => customStep > 1 ? setCustomStep((step) => step - 1) : setScreen("routes")} aria-label="返回">‹</button>
+            <div><h1 className={styles.compactPageTitle}>创建自定义挑战</h1><p>第 {customStep} 步，共 4 步</p></div>
+          </header>
+          <div className={styles.builderProgress}>{[1,2,3,4].map((step) => <i key={step} className={step <= customStep ? styles.builderProgressActive : ""} />)}</div>
+
+          {customStep === 1 && <>
+            <section className={styles.builderIntro}><small>01 · 基本信息</small><h2>这次想走多久？</h2><p>名称可以留空，系统会使用默认名称。</p></section>
+            <div className={styles.setupGroup}>
+              <label className={styles.builderField}><span>挑战名称</span><input value={customDraft.challengeName} maxLength={30} placeholder="给这次挑战起一个名字" onChange={(event) => setCustomDraft({ ...customDraft, challengeName: event.target.value })} /></label>
+            </div>
+            <div className={styles.setupGroup}>
+              <div className={styles.setupTitle}><span>挑战周期</span><small>最少3天，最多50天</small></div>
+              <div className={styles.durationGrid}>{[3,7,14,21,30,50].map((days) => <button key={days} className={customDraft.durationDays === days ? styles.choiceActive : ""} onClick={() => setCustomDraft({ ...customDraft, durationDays: days })}>{days}天</button>)}</div>
+              <label className={styles.builderField}><span>自定义天数</span><input type="number" min={3} max={50} value={customDraft.durationDays} onChange={(event) => setCustomDraft({ ...customDraft, durationDays: Math.min(50, Math.max(0, Number(event.target.value))) })} /></label>
+            </div>
+            <div className={styles.setupGroup}>
+              <div className={styles.setupTitle}><span>开始日期</span><small>只生成正式开始后的挑战日</small></div>
+              <div className={`${styles.segmented} ${styles.threeSegments}`}>
+                {(["today", "tomorrow", "custom"] as const).map((mode) => <button key={mode} className={customDraft.startMode === mode ? styles.segmentActive : ""} onClick={() => {
+                  const date = new Date(); if (mode === "tomorrow") date.setDate(date.getDate() + 1);
+                  setCustomDraft({ ...customDraft, startMode: mode, startDate: mode === "custom" ? customDraft.startDate : localDateKey(date) });
+                }}>{mode === "today" ? "今天" : mode === "tomorrow" ? "明天" : "选择日期"}</button>)}
+              </div>
+              {customDraft.startMode === "custom" && <label className={styles.builderField}><span>日期</span><input type="date" min={todayKey()} value={customDraft.startDate} onChange={(event) => setCustomDraft({ ...customDraft, startDate: event.target.value })} /></label>}
+            </div>
+          </>}
+
+          {customStep === 2 && <>
+            <section className={styles.builderIntro}><small>02 · 选择项目</small><h2>想把哪些事放进生活？</h2><p>可以跨路线选择，重复项目会自动合并。已选择 {customDraft.selectedTasks.length} 项。</p></section>
+            <div className={styles.segmented}><button className={customSource === "library" ? styles.segmentActive : ""} onClick={() => setCustomSource("library")}>系统题库</button><button className={customSource === "routes" ? styles.segmentActive : ""} onClick={() => setCustomSource("routes")}>已有路线</button></div>
+            <div className={styles.libraryGroups}>
+              {(customSource === "library" ? customChallengeLibrary.map((group) => ({ key: group.groupName, name: group.groupName, items: group.items })) : routeTaskGroups().map((group) => ({ key: group.route, name: group.name, items: group.items }))).map((group) => (
+                <section key={group.key} className={styles.libraryGroup}>
+                  <button className={styles.libraryGroupHeader} onClick={() => setCustomOpenGroup(customOpenGroup === group.name ? "" : group.name)}><span><b>{group.name}</b><small>{group.items.length} 项 · 已选 {group.items.filter((item) => selectedKeys.has(item.dedupeKey)).length}</small></span><i>{customOpenGroup === group.name ? "⌃" : "⌄"}</i></button>
+                  {customOpenGroup === group.name && <>
+                    <button className={styles.selectAllButton} onClick={() => selectAllCustomTasks(group.items)}>全选当前分类</button>
+                    <div className={styles.libraryItems}>{group.items.map((item) => <article key={item.taskId} className={selectedKeys.has(item.dedupeKey) ? styles.libraryItemSelected : ""}>
+                      <button className={styles.libraryItemMain} onClick={() => toggleCustomTask(item)}><span>{item.icon}</span><div><b>{item.title}</b><small>{item.goalExamples}</small></div><i>{selectedKeys.has(item.dedupeKey) ? "✓" : "+"}</i></button>
+                      <button className={styles.libraryInfo} aria-label={`查看${item.title}说明`} onClick={() => setCustomTaskOpen(item)}>···</button>
+                    </article>)}</div>
+                  </>}
+                </section>
+              ))}
+            </div>
+            <button className={styles.secondaryButton} onClick={() => setCustomUserTaskOpen(true)}>＋ 新增自己的任务</button>
+          </>}
+
+          {customStep === 3 && <>
+            <section className={styles.builderIntro}><small>03 · 目标与节律</small><h2>把每项行动变得更具体</h2><p>目标可以不填。请至少保留一项“每天”任务，作为生活的稳定锚点。</p></section>
+            <div className={styles.selectedTaskEditor}>{customDraft.selectedTasks.map((task, index) => <article key={task.taskId}>
+              <header><span>{task.icon}</span><div><small>挑战 {index + 1}</small><b>{task.title}</b></div><button onClick={() => setCustomDraft({ ...customDraft, selectedTasks: customDraft.selectedTasks.filter((item) => item.taskId !== task.taskId) })} aria-label={`移除${task.title}`}>×</button></header>
+              <label className={styles.builderField}><span>我的目标（可选）</span><input value={task.userGoal} placeholder={task.goalExamples.split("／")[0]} onChange={(event) => updateSelectedCustomTask(task.taskId, { userGoal: event.target.value })} /></label>
+              <label className={styles.builderField}><span>生活节律</span><select value={task.rhythmType} onChange={(event) => updateSelectedCustomTask(task.taskId, { rhythmType: event.target.value as RhythmType, selectedWeekdays: [] })}><option value="daily">每天</option><option value="every_other_day">隔一天</option><option value="weekly">每周指定日期</option></select></label>
+              {task.rhythmType === "weekly" && <div className={styles.weekdayPicker}>{weekdayLabels.map(([value, label]) => <button key={value} className={task.selectedWeekdays.includes(value) ? styles.choiceActive : ""} onClick={() => updateSelectedCustomTask(task.taskId, { selectedWeekdays: task.selectedWeekdays.includes(value) ? task.selectedWeekdays.filter((day) => day !== value) : [...task.selectedWeekdays, value] })}>{label}</button>)}</div>}
+              {task.rhythmType === "every_other_day" && <p className={styles.rhythmHint}>从挑战开始日计算，在第1、3、5、7天出现。</p>}
+            </article>)}</div>
+          </>}
+
+          {customStep === 4 && <>
+            <section className={styles.builderIntro}><small>04 · 达标与确认</small><h2>给每天留一点容错</h2><p>达标门槛会根据当天实际出现的任务数量自动换算。</p></section>
+            <div className={styles.setupGroup}>
+              <div className={styles.setupTitle}><span>每天允许未完成几项？</span><small>当天只有1项任务时，仍需完成1项才算达标</small></div>
+              <div className={styles.stepper}><button onClick={() => setCustomDraft({ ...customDraft, allowedMisses: Math.max(0, customDraft.allowedMisses - 1) })}>−</button><strong>{customDraft.allowedMisses}<small>项</small></strong><button onClick={() => setCustomDraft({ ...customDraft, allowedMisses: Math.min(Math.max(0, customDraft.selectedTasks.length - 1), customDraft.allowedMisses + 1) })}>＋</button></div>
+            </div>
+            <section className={styles.confirmCard}>
+              <h2>{customDraft.challengeName.trim() || "我的生活重启挑战"}</h2>
+              <dl><div><dt>挑战周期</dt><dd>{customDraft.durationDays}天</dd></div><div><dt>开始日期</dt><dd>{customDraft.startDate}</dd></div><div><dt>结束日期</dt><dd>{endDateFor(customDraft.startDate, customDraft.durationDays)}</dd></div><div><dt>挑战项目</dt><dd>{customDraft.selectedTasks.length}项</dd></div><div><dt>生活节律</dt><dd>每天 {customDraft.selectedTasks.filter((task) => task.rhythmType === "daily").length} · 隔日 {customDraft.selectedTasks.filter((task) => task.rhythmType === "every_other_day").length} · 每周 {customDraft.selectedTasks.filter((task) => task.rhythmType === "weekly").length}</dd></div><div><dt>每日规则</dt><dd>允许 {customDraft.allowedMisses} 项未完成</dd></div></dl>
+            </section>
+            <section className={styles.previewStrip}><b>前7天任务数量预览</b><div>{previewDays.map((item) => <span key={item.day}><small>DAY {item.day}</small><strong>{item.total}项</strong><i>需完成 {customRequiredCount(item.total, customDraft.allowedMisses)}项</i></span>)}</div></section>
+            <p className={styles.lockNotice}>挑战开始后，仅可修改挑战名称；任务、目标、生活节律和容错标准将保持不变，以保护历史记录。</p>
+          </>}
+
+          <div className={styles.setupActions}><button className={styles.primaryButton} onClick={customStep === 4 ? createCustomChallenge : customBuilderNext}>{customStep === 4 ? "创建挑战" : "继续"}</button>{customStep > 1 && <button className={styles.textButton} onClick={() => setCustomStep((step) => step - 1)}>返回上一步</button>}</div>
+
+          {customTaskOpen && <div className={styles.sheetBackdrop} onClick={() => setCustomTaskOpen(null)}><section className={styles.detailSheet} onClick={(event) => event.stopPropagation()}><div className={styles.sheetHandle}/><div className={`${styles.sheetIcon} ${styles[customTaskOpen.tone]}`}>{customTaskOpen.icon}</div><small>{customTaskOpen.category}</small><h2>{customTaskOpen.title}</h2><p>{customTaskOpen.description}</p><div className={styles.sheetTip}><span>行动建议</span>{customTaskOpen.suggestion}</div><p className={styles.goalExamples}>目标示例：{customTaskOpen.goalExamples}</p><button className={styles.primaryButton} onClick={() => { toggleCustomTask(customTaskOpen); setCustomTaskOpen(null); }}>{selectedKeys.has(customTaskOpen.dedupeKey) ? "取消选择" : "加入挑战"}</button></section></div>}
+          {customUserTaskOpen && <div className={styles.sheetBackdrop} onClick={() => setCustomUserTaskOpen(false)}><section className={styles.detailSheet} onClick={(event) => event.stopPropagation()}><div className={styles.sheetHandle}/><small>我的任务</small><h2>新增自己的任务</h2><label className={styles.builderField}><span>任务名称</span><input value={customUserTask.title} maxLength={20} placeholder="例如：背英语单词" onChange={(event) => setCustomUserTask({ ...customUserTask, title: event.target.value })}/></label><label className={styles.builderField}><span>我的目标（可选）</span><input value={customUserTask.userGoal} placeholder="例如：20个" onChange={(event) => setCustomUserTask({ ...customUserTask, userGoal: event.target.value })}/></label><label className={styles.builderField}><span>生活节律</span><select value={customUserTask.rhythmType} onChange={(event) => setCustomUserTask({ ...customUserTask, rhythmType: event.target.value as RhythmType, selectedWeekdays: [] })}><option value="daily">每天</option><option value="every_other_day">隔一天</option><option value="weekly">每周指定日期</option></select></label>{customUserTask.rhythmType === "weekly" && <div className={styles.weekdayPicker}>{weekdayLabels.map(([value,label]) => <button key={value} className={customUserTask.selectedWeekdays.includes(value) ? styles.choiceActive : ""} onClick={() => setCustomUserTask({ ...customUserTask, selectedWeekdays: customUserTask.selectedWeekdays.includes(value) ? customUserTask.selectedWeekdays.filter((day) => day !== value) : [...customUserTask.selectedWeekdays,value] })}>{label}</button>)}</div>}<button className={styles.primaryButton} onClick={addUserCustomTask}>添加任务</button><button className={styles.textButton} onClick={() => setCustomUserTaskOpen(false)}>取消</button></section></div>}
+        </section>
+      </main>
+    );
+  }
+
+  if (screen === "life-spark") {
+    const favoriteItems = lifeSparkData.favorites.map((id) => lifeSparkItems.find((item) => item.id === id)).filter((item): item is LifeSparkItem => Boolean(item));
+    const triedItems = lifeSparkData.triedItems.map((record) => ({ ...record, item: lifeSparkItems.find((item) => item.id === record.itemId) })).filter((record): record is typeof record & { item: LifeSparkItem } => Boolean(record.item));
+    return (
+      <main className={styles.centerStage}>
+        <section className={`${styles.phoneShell} ${styles.lifeSparkShell}`}>
+          <header className={styles.pageHeader}>
+            <button className={styles.iconButton} onClick={lifeSparkView === "wheel" ? closeLifeSpark : () => setLifeSparkView("wheel")} aria-label={lifeSparkView === "wheel" ? "返回今天" : "返回转盘"}>‹</button>
+            <div className={styles.lifeSparkHeaderCopy}><p>生活不止有需要完成的事，也有一些值得试试的小事。</p><small>不是任务，想做就试试看。</small></div>
+          </header>
+          <div className={styles.lifeSparkMiniNav}>
+            <button className={lifeSparkView === "favorites" ? styles.lifeSparkMiniActive : ""} onClick={() => setLifeSparkView(lifeSparkView === "favorites" ? "wheel" : "favorites")}><span>♡</span> 我的收藏 <small>{lifeSparkData.favorites.length}</small></button>
+            <button className={lifeSparkView === "tried" ? styles.lifeSparkMiniActive : ""} onClick={() => setLifeSparkView(lifeSparkView === "tried" ? "wheel" : "tried")}><span>✦</span> 我试过的 <small>{lifeSparkData.triedItems.length}</small></button>
+          </div>
+
+          {lifeSparkView === "wheel" ? <>
+            <section className={styles.lifeSparkIntro}><span>生活盲盒</span><h2>今天，要给生活加点什么？</h2><p>没有正确答案，也不用把它变成新的待办。抽到不合适的，换一个就好。</p></section>
+            <div className={styles.lifeSparkWheelArea}>
+              <i className={styles.lifeSparkPointer} />
+              <div className={`${styles.lifeSparkWheel} ${lifeSparkSpinning ? styles.lifeSparkWheelSpinning : ""}`} style={{ transform: `rotate(${lifeSparkRotation}deg)`, transitionDuration: `${lifeSparkSpinDuration}ms` }} aria-hidden="true">
+                {lifeSparkCategories.map((category, index) => {
+                  const angle = index * 36 + 18;
+                  return <span className={styles.lifeSparkWheelLabel} key={category.category} style={{ transform: `rotate(${angle}deg) translateY(-104px) rotate(${-angle}deg)` }}>{category.categoryName}</span>;
+                })}
+              </div>
+              <button className={styles.lifeSparkCenterButton} onClick={() => runLifeSparkDraw(false)} disabled={lifeSparkSpinning}>{lifeSparkSpinning ? "抽取中…" : "抽一个\n试试"}</button>
+            </div>
+            <p className={styles.lifeSparkSpinningText}>{lifeSparkSpinning ? "看看今天加点什么……" : "轻轻点一下转盘中央"}</p>
+          </> : <section className={styles.lifeSparkCollection}>
+            <header><button onClick={() => setLifeSparkView("wheel")}>‹ 返回转盘</button><div><small>{lifeSparkView === "favorites" ? "留给以后再看" : "你选择尝试过的内容"}</small><h2>{lifeSparkView === "favorites" ? "我的收藏" : "我试过的"}</h2></div></header>
+            <p className={styles.lifeSparkCollectionNote}>{lifeSparkView === "tried" ? "这里只记录你选择尝试过的内容，不是完成打卡。" : "收藏只是把喜欢的内容留在这里，不会加入挑战。"}</p>
+            <div className={styles.lifeSparkCollectionList}>
+              {(lifeSparkView === "favorites" ? favoriteItems : triedItems.map((record) => record.item)).length === 0 && <div className={styles.emptyState}>{lifeSparkView === "favorites" ? "遇到喜欢的内容时，可以把它收藏在这里。" : "点击结果卡片里的“就试试”，内容会出现在这里。"}</div>}
+              {(lifeSparkView === "favorites" ? favoriteItems : triedItems.map((record) => record.item)).map((item) => {
+                const tried = lifeSparkData.triedItems.find((record) => record.itemId === item.id);
+                return <article key={item.id}><button onClick={() => setLifeSparkResult(item)}><small>{item.categoryName}{lifeSparkView === "tried" && tried ? ` · ${new Date(tried.triedAt).toLocaleDateString("zh-CN")}` : ""}</small><b>{item.title}</b><i>›</i></button>{lifeSparkView === "favorites" && <button className={styles.lifeSparkRemove} onClick={() => toggleLifeSparkFavorite(item.id)}>取消收藏</button>}</article>;
+              })}
+            </div>
+          </section>}
+
+          <footer className={styles.lifeSparkFooter}>它不是挑战，也不会影响今日达标和连续天数。</footer>
+
+          {lifeSparkResult && <div className={styles.sheetBackdrop} onClick={() => setLifeSparkResult(null)}>
+            <section className={`${styles.detailSheet} ${styles.lifeSparkResult}`} role="dialog" aria-modal="true" aria-label="生活盲盒结果" onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} />
+              <span className={styles.lifeSparkResultIcon}>✦</span>
+              <small>{lifeSparkResult.categoryName}</small>
+              <h2>{lifeSparkResult.title}</h2>
+              {lifeSparkResult.tip && <p>{lifeSparkResult.tip}</p>}
+              <button className={styles.primaryButton} onClick={() => markLifeSparkTried(lifeSparkResult.id)}>就试试</button>
+              <div className={styles.lifeSparkResultActions}>
+                <button onClick={() => runLifeSparkDraw(true)} disabled={lifeSparkSpinning}>{lifeSparkSpinning ? "正在换…" : "换一个"}</button>
+                <button onClick={() => toggleLifeSparkFavorite(lifeSparkResult.id)}>{lifeSparkData.favorites.includes(lifeSparkResult.id) ? "已收藏" : "收藏"}</button>
+              </div>
+              <button className={styles.textButton} onClick={() => setLifeSparkResult(null)}>关闭</button>
+            </section>
+          </div>}
+          {toast && <div className={styles.toast} role="status">{toast}</div>}
+        </section>
+      </main>
+    );
+  }
+
   if (screen === "about") {
     return (
       <main className={styles.centerStage}>
@@ -945,7 +1506,7 @@ export default function HuixuApp() {
           </section>
           <div className={styles.infoSections}>
             <section><h2>为什么做回序</h2><p>生活混乱时，人往往不需要更多目标，而需要一个可以重新开始的顺序。回序不要求连续打卡，也不把中断视为失败，只帮助你看清今天真实完成了什么。</p></section>
-            <section><h2>三条挑战路线</h2><ul><li><b>7日清场</b>：先清理眼前最真实的阻力。</li><li><b>21日稳定</b>：建立起床、活动和注意力的基本节奏。</li><li><b>50日挑战</b>：长期实践一套更完整的生活规则。</li></ul></section>
+            <section><h2>四条挑战路线</h2><ul><li><b>7日清场</b>：先清理眼前最真实的阻力。</li><li><b>21日稳定</b>：建立起床、活动和注意力的基本节奏。</li><li><b>50日挑战</b>：长期实践一套更完整的生活规则。</li><li><b>自定义挑战</b>：在3—50天内安排自己的任务、目标和生活节律。</li></ul></section>
             <section><h2>产品原则</h2><ul><li>严格记录事实，温柔对待结果。</li><li>中断不会让已经发生的行动归零。</li><li>基础生活优先，不制造新的完成压力。</li></ul></section>
             <section><h2>数据与隐私</h2><p>回序不要求注册登录。每日记录、挑战内容和时间设置默认只保存在这台设备上；匿名统计未接入时不会发送任何数据，接入后也不会上传你的文字记录。</p></section>
             <section><h2>免费与开源</h2><p>回序计划以免费、非商业化和开源的方式持续迭代，希望让更多人能够使用、讨论和改进它。</p></section>
@@ -1003,14 +1564,15 @@ export default function HuixuApp() {
               <section className={styles.finishPanel}>
                 <div className={styles.finishHalo}><BrandOrbit compact /></div>
                 <span className={styles.statusPill}>{lifecycle === "ended" ? "已提前结束" : challengePassed ? "完成本轮挑战" : "本轮未达成"}</span>
-                <h2>{challengePassed ? "你留下的不只是连续的记录，而是一套可以再次回来的生活节奏。" : "这一轮没有达到完成条件，但已经发生的行动不会归零。"}</h2>
-                <p>{challengePassed ? "挑战已经结束，但这些行动不需要随之停止。看看哪些方法真正适合你，再决定接下来想继续保留什么。" : "完成、未完成和中断都会作为真实记录留在这里。你可以回看哪些方法有效，再决定休息、重新开始或选择更适合的路线。"}</p>
+                <h2>{lifecycle === "ended" ? "这一轮在这里停下，已经发生的行动和记录都会被保留。" : challengePassed ? "你留下的不只是连续的记录，而是一套可以再次回来的生活节奏。" : "这一轮没有达到完成条件，但已经发生的行动不会归零。"}</h2>
+                <p>{lifecycle === "ended" ? "你可以回看哪些方法真正有效，再决定休息、重新开始或选择更适合的路线。" : challengePassed ? "挑战已经结束，但这些行动不需要随之停止。看看哪些方法真正适合你，再决定接下来想继续保留什么。" : "完成、未完成和中断都会作为真实记录留在这里。你可以回看哪些方法有效，再决定休息、重新开始或选择更适合的路线。"}</p>
                 <div className={styles.finishStats}>
-                  <div><strong>{countedDays}</strong><small>达标日</small></div>
-                  <div><strong>{completionRate}%</strong><small>稳定率</small></div>
+                  <div><strong>{challengeType === "custom" ? history.filter((item) => item.statusKey === "completed").length : countedDays}</strong><small>{challengeType === "custom" ? "完成日" : "达标日"}</small></div>
+                  <div><strong>{challengeType === "custom" ? history.filter((item) => item.statusKey === "qualified").length : `${completionRate}%`}</strong><small>{challengeType === "custom" ? "达标日" : "稳定率"}</small></div>
                   <div><strong>{longestStreak}</strong><small>最长连续</small></div>
                 </div>
-                {route === "50" && <p className={styles.optionalSummary}>可选挑战累计完成 {optionalCount} 次</p>}
+                {challengeType === "custom" && <p className={styles.optionalSummary}>未达标 {history.filter((item) => item.statusKey === "failed").length} 天 · 累计达标 {countedDays} 天</p>}
+                {challengeType === "fixed" && route === "50" && <p className={styles.optionalSummary}>可选挑战累计完成 {optionalCount} 次</p>}
                 <button className={styles.primaryButton} onClick={() => setTab("history")}>查看历史挑战</button>
                 <button className={styles.secondaryButton} onClick={exportMarkdown}>下载本轮 Markdown</button>
                 <button className={styles.textButton} onClick={browseOtherRoutes}>查看其他挑战路线</button>
@@ -1021,7 +1583,7 @@ export default function HuixuApp() {
                 <span>挑战已暂停</span>
                 <h2>已经走到 DAY {String(day).padStart(2, "0")}</h2>
                 <p>暂停期间不会生成新的挑战日。准备好以后，会从这里继续。</p>
-                <button className={styles.primaryButton} onClick={() => setLifecycle("active")}>恢复这轮挑战</button>
+                <button className={styles.primaryButton} onClick={resumeChallenge}>恢复这轮挑战</button>
                 <button className={styles.textButton} onClick={() => setTab("records")}>查看已有记录</button>
               </section>
             ) : settled ? (
@@ -1031,7 +1593,7 @@ export default function HuixuApp() {
                 </div>
                 {dayStatus.label && <span className={styles.statusPill}>{dayStatus.label}</span>}
                 <h2>生活，回来了一点。</h2>
-                <p>{route === "50" ? `基础挑战 ${baseCompleted} / 5 · 可选挑战 ${optionalTodayCompleted} / 5（不影响达标）` : `完成 ${completed} 个今日行动 · ${checkins.length - completed} 项未完成`}</p>
+                <p>{challengeType === "custom" ? `今日完成 ${completed} / ${checkins.length} · 需完成 ${customRequiredCount(checkins.length, customConfig?.dailyThresholdRule.allowedMisses ?? 0)} 项达标` : route === "50" ? `基础挑战 ${baseCompleted} / 5 · 可选挑战 ${optionalTodayCompleted} / 5（不影响达标）` : `完成 ${completed} 个今日行动 · ${checkins.length - completed} 项未完成`}</p>
                 <div className={styles.miniSummary}>
                   {checkins.map((item) => (
                     <div key={item.id}>
@@ -1059,25 +1621,25 @@ export default function HuixuApp() {
                   <span>今日打卡</span>
                     <small>{todayCompleted} / {todayTotal} 已完成</small>
                   </div>
-                  <p>{route === "7" ? "完成今日清场挑战，就是完成日" : route === "21" ? "前三项固定挑战全部完成，就是稳定日；累计15个稳定日并完成15次附加挑战，即完成本轮挑战" : "5项基础挑战完成4项为达标日，5项全部完成为全部完成日；可选挑战不影响判定"}</p>
+                  <p>{challengeType === "custom" ? `今天显示 ${checkins.length} 项，完成 ${customRequiredCount(checkins.length, customConfig?.dailyThresholdRule.allowedMisses ?? 0)} 项为达标日，全部完成为完成日` : route === "7" ? "完成今日清场挑战，就是完成日" : route === "21" ? "前三项固定挑战全部完成，就是稳定日；累计15个稳定日并完成15次附加挑战，即完成本轮挑战" : "5项基础挑战完成4项为达标日，5项全部完成为全部完成日；可选挑战不影响判定"}</p>
                 </div>
                 <div className={styles.checkinStack}>
                   {checkins.filter((item) => item.category !== "optional" && item.category !== "rotation").map((item) => renderTaskCard(item))}
                 </div>
-                {route === "21" && <>
+                {challengeType === "fixed" && route === "21" && <>
                   <div className={styles.subChallengeLabel}><span>今日附加挑战</span><small>不影响稳定日，完成后计入挑战条件</small></div>
                   <div className={styles.checkinStack}>{checkins.filter((item) => item.category === "rotation").map((item) => renderTaskCard(item, true))}</div>
                 </>}
-                {route === "50" && <section className={styles.optionalChallenges}>
+                {challengeType === "fixed" && route === "50" && <section className={styles.optionalChallenges}>
                   <button className={styles.optionalToggle} onClick={() => setOptionalOpen((value) => !value)}><span><b>可选挑战</b><small>自由参考，不强制完成 · 今天完成 {optionalTodayCompleted} 次</small></span><i>{optionalOpen ? "⌃" : "⌄"}</i></button>
                   {optionalOpen && <div className={styles.checkinStack}>{checkins.filter((item) => item.category === "optional").map((item) => renderTaskCard(item, true))}</div>}
                 </section>}
-                <label className={`${styles.noteField} ${route === "50" ? styles.reflectionField : ""}`}>
+                <label className={`${styles.noteField} ${challengeType === "fixed" && route === "50" ? styles.reflectionField : ""}`}>
                   <span>⌁</span>
                   <textarea
                     value={note}
                     onChange={(event) => setNote(event.target.value)}
-                    placeholder={route === "50" ? "可以留下一句话；也可以在其他软件或纸质日记中记录" : "今天想留下什么？"}
+                    placeholder={challengeType === "fixed" && route === "50" ? "可以留下一句话；也可以在其他软件或纸质日记中记录" : "今天想留下什么？"}
                     rows={1}
                   />
                 </label>
@@ -1086,6 +1648,7 @@ export default function HuixuApp() {
                 </button>
               </>
             )}
+            {renderLifeSparkEntry()}
           </div>
         )}
 
@@ -1100,21 +1663,21 @@ export default function HuixuApp() {
             <section className={styles.progressHero}>
               <p>已经走过</p>
               <strong>{day}<span> / {currentRoute.days}</span></strong>
-              <small>{route === "21" ? "累计获得15个稳定日，并完成15次附加挑战，即可完成本轮挑战。三项固定挑战全部完成，当天才计为稳定日。" : route === "50" ? "累计完成40个达标日即完成挑战；5项基础挑战完成4项为达标日，5项全部完成为全部完成日。可选挑战只作参考，不影响达标。" : currentRoute.target}</small>
+              <small>{challengeType === "custom" ? `完成日和达标日都计入累计达标。每天允许 ${customConfig?.dailyThresholdRule.allowedMisses ?? 0} 项未完成，系统按当天实际任务数换算门槛。` : route === "21" ? "累计获得15个稳定日，并完成15次附加挑战，即可完成本轮挑战。三项固定挑战全部完成，当天才计为稳定日。" : route === "50" ? "累计完成40个达标日即完成挑战；5项基础挑战完成4项为达标日，5项全部完成为全部完成日。可选挑战只作参考，不影响达标。" : currentRoute.target}</small>
             </section>
             <div className={styles.dayGrid}>
               {Array.from({ length: currentRoute.days }, (_, index) => {
                 const n = index + 1;
                 const record = history.find((item) => item.day === n);
-                const state = record?.counted ? "done" : record ? "partial" : n === day ? "current" : "future";
+                const state = challengeType === "custom" && record?.statusKey === "completed" ? "full" : record?.counted ? "done" : record ? "partial" : n === day ? "current" : "future";
                 return <button key={n} className={styles[state]} onClick={() => record && setDetailRecord(record)} disabled={!record}>{n}</button>;
               })}
             </div>
             <div className={styles.statGrid}>
-              <article><span>☼</span><p>{route === "7" ? "完成日" : route === "21" ? "稳定日" : "累计达标"}</p><strong>{countedDays} <small>/ {route === "7" ? 5 : route === "21" ? 15 : 40}</small></strong></article>
-              <article><span>◌</span><p>{route === "21" ? "附加挑战" : "最长连续"}</p><strong>{route === "21" ? additionalCount : longestStreak} <small>{route === "21" ? "/ 15次" : "天"}</small></strong></article>
+              <article><span>☼</span><p>{challengeType === "custom" ? "累计达标" : route === "7" ? "完成日" : route === "21" ? "稳定日" : "累计达标"}</p><strong>{countedDays} <small>{challengeType === "custom" ? "天" : `/ ${route === "7" ? 5 : route === "21" ? 15 : 40}`}</small></strong></article>
+              <article><span>◌</span><p>{challengeType === "fixed" && route === "21" ? "附加挑战" : "最长连续"}</p><strong>{challengeType === "fixed" && route === "21" ? additionalCount : longestStreak} <small>{challengeType === "fixed" && route === "21" ? "/ 15次" : "天"}</small></strong></article>
             </div>
-            {route === "50" && (
+            {challengeType === "fixed" && route === "50" && (
               <div className={styles.routeStats}>
                 {[
                   ["全部完成日", history.filter((item) => item.statusKey === "full").length],
@@ -1124,9 +1687,19 @@ export default function HuixuApp() {
                 ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value} {label === "可选挑战累计" ? "次" : "天"}</b></div>)}
               </div>
             )}
+            {challengeType === "custom" && (
+              <div className={styles.routeStats}>
+                {[
+                  ["完成日", history.filter((item) => item.statusKey === "completed").length],
+                  ["达标日", history.filter((item) => item.statusKey === "qualified").length],
+                  ["未达标日", history.filter((item) => item.statusKey === "failed" || item.statusKey === "unrecorded").length],
+                  ["剩余天数", Math.max(0, currentRoute.days - day)],
+                ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value} 天</b></div>)}
+              </div>
+            )}
             <article className={styles.insightCard}>
               <div className={styles.insightOrb} />
-              <div><small>DAY {String(day).padStart(2, "0")}</small><p>{encouragements[route][Math.min(day - 1, encouragements[route].length - 1)]}</p></div>
+              <div><small>DAY {String(day).padStart(2, "0")}</small><p>{challengeType === "custom" ? "按今天真实出现的任务行动就好，不需要提前承担之后的日子。" : encouragements[route][Math.min(day - 1, encouragements[route].length - 1)]}</p></div>
             </article>
           </div>
         )}
@@ -1135,7 +1708,10 @@ export default function HuixuApp() {
           <div className={styles.screenContent}>
             <header className={styles.appHeader}>
               <div><p>{currentRoute.name}</p><h1>记录</h1></div>
-              <button className={styles.sunButton} aria-label="搜索记录" onClick={() => setSearchingRecords((value) => !value)}>⌕</button>
+              <button className={styles.sunButton} aria-label="搜索记录" onClick={() => setSearchingRecords((value) => {
+                if (value) setRecordQuery("");
+                return !value;
+              })}>⌕</button>
             </header>
             {searchingRecords && (
               <label className={styles.searchField}>
@@ -1159,7 +1735,7 @@ export default function HuixuApp() {
                   const dateNumber = index + 1;
                   const key = `${recordMonthCursor}-${String(dateNumber).padStart(2, "0")}`;
                   const record = calendarRecords.get(key);
-                  return <button key={key} className={record?.counted ? styles.calendarDone : record ? styles.calendarPartial : ""} disabled={!record} onClick={() => record && setDetailRecord(record)}><b>{dateNumber}</b>{record && <small>DAY {record.day}</small>}</button>;
+                  return <button key={key} className={challengeType === "custom" && record?.statusKey === "completed" ? styles.calendarFull : record?.counted ? styles.calendarDone : record ? styles.calendarPartial : ""} disabled={!record} onClick={() => record && setDetailRecord(record)}><b>{dateNumber}</b>{record && <small>DAY {record.day}</small>}</button>;
                 })}
               </div>
             ) : <div className={styles.recordTimeline}>
@@ -1170,7 +1746,7 @@ export default function HuixuApp() {
                   <time>{record.date}</time>
                   <div>
                     <span>DAY {String(record.day).padStart(2, "0")}{record.status ? ` · ${record.status}` : ""}</span>
-                    {route !== "21" && <h3>{record.stage}</h3>}
+                    {route !== "21" && challengeType !== "custom" && <h3>{record.stage}</h3>}
                     <p>{record.note || `完成${record.doneIds.length}项，其他内容按当时状态保存。`}</p>
                   </div>
                 </article>
@@ -1191,7 +1767,7 @@ export default function HuixuApp() {
               {archives.map((item) => (
                 <button key={item.id} onClick={() => { setArchiveOpen(item); setArchiveRecordOpen(null); }}>
                   <span>{item.status === "finished" ? "✓" : "↗"}</span>
-                  <div><small>{new Date(item.startedAt).toLocaleDateString("zh-CN")} — {new Date(item.endedAt).toLocaleDateString("zh-CN")}</small><b>{routeInfo[item.route].name}</b><p>{item.history.length} 天记录 · {item.status === "finished" ? "已完成" : "已结束"}</p></div>
+                  <div><small>{new Date(item.startedAt).toLocaleDateString("zh-CN")} — {new Date(item.endedAt).toLocaleDateString("zh-CN")}</small><b>{challengeDisplayName(item.challengeType === "custom" ? "custom" : "fixed", item.route, item.customConfig ?? null)}</b><p>{item.history.length} 天记录 · {item.status === "finished" ? "已完成" : "已结束"}</p></div>
                   <i>›</i>
                 </button>
               ))}
@@ -1217,7 +1793,8 @@ export default function HuixuApp() {
                       setTab("today");
                       return;
                     }
-                    setLifecycle(lifecycle === "paused" ? "active" : "paused");
+                    if (lifecycle === "paused") resumeChallenge();
+                    else pauseChallenge();
                   }}>
                     <span>{lifecycle === "paused" ? "▶" : "Ⅱ"}</span>
                     <div><b>{lifecycle === "paused" ? "恢复挑战" : "暂停挑战"}</b><small>{lifecycle === "paused" ? "从当前挑战日继续" : "暂停期间不生成新的挑战日"}</small></div>
@@ -1226,6 +1803,16 @@ export default function HuixuApp() {
                 <button onClick={browseOtherRoutes}><span>⌁</span><div><b>查看其他挑战路线</b><small>浏览不会改变当前挑战</small></div></button>
                 {lifecycle === "active" || lifecycle === "paused" ? <button onClick={() => setEndingOpen(true)}><span>□</span><div><b>提前结束这轮挑战</b><small>保留全部事实并生成归档</small></div></button> : null}
               </div>
+              {challengeType === "custom" && customConfig && <section className={styles.customSettingsCard}>
+                <header><div><small>自定义挑战设置</small><h3>{customConfig.challengeName}</h3></div><button onClick={() => setCustomNameEditing((value) => !value)}>{customNameEditing ? "取消" : "修改名称"}</button></header>
+                {customNameEditing && <label className={styles.builderField}><span>挑战名称</span><input defaultValue={customConfig.challengeName} maxLength={30} onBlur={(event) => {
+                  const name = event.currentTarget.value.trim() || "我的生活重启挑战";
+                  setCustomConfig({ ...customConfig, challengeName: name, updatedAt: new Date().toISOString() }); setCustomNameEditing(false); showToast("挑战名称已修改");
+                }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}/><small>输入后按回车或点击空白处保存</small></label>}
+                <dl><div><dt>周期</dt><dd>{customConfig.durationDays}天</dd></div><div><dt>日期</dt><dd>{customConfig.startDate} — {customConfig.endDate}</dd></div><div><dt>达标规则</dt><dd>每天允许 {customConfig.dailyThresholdRule.allowedMisses} 项未完成</dd></div><div><dt>任务数量</dt><dd>{customConfig.selectedTasks.length}项</dd></div></dl>
+                <details><summary>查看已选择任务</summary><div>{customConfig.selectedTasks.map((task) => <p key={task.taskId}><b>{task.title}</b><span>{task.userGoal ? `目标：${task.userGoal} · ` : ""}{task.rhythmType === "daily" ? "每天" : task.rhythmType === "every_other_day" ? "隔一天" : `每周 ${task.selectedWeekdays.map((day) => "日一二三四五六"[day]).join("、")}`}</span></p>)}</div></details>
+                <p className={styles.lockNotice}>任务、目标、生活节律和容错标准在挑战开始后保持只读，历史日期不会重新计算。</p>
+              </section>}
             </section>
             <section className={styles.settingsSection}>
               <h2>记录与数据</h2>
@@ -1266,7 +1853,7 @@ export default function HuixuApp() {
             ["records", "◇", "记录"],
             ["me", "○", "我的"],
           ] as [Tab, string, string][]).map(([key, icon, label]) => (
-            <button key={key} className={tab === key ? styles.activeTab : ""} onClick={() => { setTab(key); if (key === "records") setSearchingRecords(false); }}>
+            <button key={key} className={tab === key ? styles.activeTab : ""} onClick={() => { setTab(key); setSearchingRecords(false); setRecordQuery(""); }}>
               <NavIcon name={key} fallback={icon} />{label}
             </button>
           ))}
@@ -1279,7 +1866,7 @@ export default function HuixuApp() {
               {detailTask ? (
                 <>
                   <div className={`${styles.sheetIcon} ${styles[detailTask.tone]}`}>{detailTask.icon}</div>
-                  <small>{detailTask.category === "anchor" ? route === "21" ? "固定挑战" : "稳定锚点" : detailTask.category === "rotation" ? "附加挑战" : detailTask.category === "optional" ? "可选挑战" : detailTask.category === "base" ? "基础挑战" : "清场挑战"}</small>
+                  <small>{challengeType === "custom" ? "自定义挑战" : detailTask.category === "anchor" ? route === "21" ? "固定挑战" : "稳定锚点" : detailTask.category === "rotation" ? "附加挑战" : detailTask.category === "optional" ? "可选挑战" : detailTask.category === "base" ? "基础挑战" : "清场挑战"}</small>
                   <h2>{detailTask.name}</h2>
                   <p>{detailTask.description}</p>
                   <div className={styles.sheetTip}><span>行动建议</span>{detailTask.suggestion}</div>
@@ -1305,9 +1892,9 @@ export default function HuixuApp() {
                   <h2>{detailRecord.stage}</h2>
                   {detailRecord.status && <span className={styles.statusPill}>{detailRecord.status}</span>}
                   <div className={styles.recordTaskList}>
-                    {(detailRecord.tasks ?? getTasks(route, detailRecord.day)).map((task) => (
+                    {(detailRecord.tasks ?? tasksForChallengeDay(challengeType, route, customConfig, detailRecord.day)).map((task) => (
                       <div key={task.id} className={detailRecord.doneIds.includes(task.id) ? styles.recordDone : ""}>
-                        <span>{task.icon}</span><b>{task.name}<small>{detailRecord.taskNotes?.[task.id]}</small></b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : detailRecord.skippedIds?.includes(task.id) ? "未完成" : "未记录"}</i>
+                        <span>{task.icon}</span><b>{task.name}<small>{task.detail}{detailRecord.taskNotes?.[task.id] ? ` · ${detailRecord.taskNotes[task.id]}` : ""}</small></b><i>{detailRecord.doneIds.includes(task.id) ? "✓" : detailRecord.skippedIds?.includes(task.id) ? "未完成" : "未记录"}</i>
                       </div>
                     ))}
                   </div>
@@ -1340,7 +1927,7 @@ export default function HuixuApp() {
                 <label><span>早晨开始</span><input type="time" value={reminder.morning} onChange={(event) => setReminder({ ...reminder, morning: event.target.value })} /></label>
                 <label><span>晚间收尾</span><input type="time" value={reminder.evening} onChange={(event) => setReminder({ ...reminder, evening: event.target.value })} /></label>
               </div>
-              {route !== "7" && (
+              {challengeType === "fixed" && route !== "7" && (
                 <div className={styles.inlineWakeSetting}>
                   <span>起床范围</span>
                   <div><input type="time" value={challengeSettings.wakeStart} onChange={(event) => {
@@ -1376,13 +1963,13 @@ export default function HuixuApp() {
         {archiveOpen && (
           <div className={styles.sheetBackdrop} onClick={() => { setArchiveOpen(null); setArchiveRecordOpen(null); }}>
             <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="挑战归档" onClick={(event) => event.stopPropagation()}>
-              <div className={styles.sheetHandle} /><small>历史挑战</small><h2>{routeInfo[archiveOpen.route].name}</h2>
+              <div className={styles.sheetHandle} /><small>历史挑战</small><h2>{challengeDisplayName(archiveOpen.challengeType === "custom" ? "custom" : "fixed", archiveOpen.route, archiveOpen.customConfig ?? null)}</h2>
               <p>{new Date(archiveOpen.startedAt).toLocaleDateString("zh-CN")} — {new Date(archiveOpen.endedAt).toLocaleDateString("zh-CN")} · {archiveOpen.history.length} 天记录</p>
               {archiveRecordOpen ? <>
                 <button className={styles.archiveBack} onClick={() => setArchiveRecordOpen(null)}>‹ 返回挑战记录</button>
                 <h3>DAY {String(archiveRecordOpen.day).padStart(2, "0")} · {archiveRecordOpen.stage}</h3>
                 {archiveRecordOpen.status && <span className={styles.statusPill}>{archiveRecordOpen.status}</span>}
-                <div className={styles.recordTaskList}>{(archiveRecordOpen.tasks ?? getTasks(archiveOpen.route, archiveRecordOpen.day)).map((task) => <div key={task.id} className={archiveRecordOpen.doneIds.includes(task.id) ? styles.recordDone : ""}><span>{task.icon}</span><b>{task.name}<small>{archiveRecordOpen.taskNotes?.[task.id]}</small></b><i>{archiveRecordOpen.doneIds.includes(task.id) ? "✓" : "未完成"}</i></div>)}</div>
+                <div className={styles.recordTaskList}>{(archiveRecordOpen.tasks ?? tasksForChallengeDay(archiveOpen.challengeType === "custom" ? "custom" : "fixed", archiveOpen.route, archiveOpen.customConfig ?? null, archiveRecordOpen.day)).map((task) => <div key={task.id} className={archiveRecordOpen.doneIds.includes(task.id) ? styles.recordDone : ""}><span>{task.icon}</span><b>{task.name}<small>{task.detail}{archiveRecordOpen.taskNotes?.[task.id] ? ` · ${archiveRecordOpen.taskNotes[task.id]}` : ""}</small></b><i>{archiveRecordOpen.doneIds.includes(task.id) ? "✓" : "未完成"}</i></div>)}</div>
                 {archiveRecordOpen.note && <blockquote>“{archiveRecordOpen.note}”</blockquote>}
               </> : <div className={`${styles.recordTaskList} ${styles.archiveDays}`}>
                 {archiveOpen.history.map((record) => <button key={record.day} onClick={() => setArchiveRecordOpen(record)} className={record.counted ? styles.recordDone : ""}><span>{record.counted ? "◆" : "◇"}</span><b>DAY {String(record.day).padStart(2, "0")}<small>{record.date} · 完成{record.doneIds.length}项</small></b><i>{record.status ? `${record.status} ` : ""}›</i></button>)}

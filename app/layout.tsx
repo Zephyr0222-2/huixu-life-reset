@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "回序｜从混乱，回到自己的节奏",
-    description: "7日清场、21日稳定、50日挑战。从今天能承受的一件小事开始。",
+    description: "7日清场、21日稳定、50日挑战与自定义挑战。从今天能承受的一件小事开始。",
     type: "website",
     locale: "zh_CN",
     images: [{ url: "/og.png", width: 1732, height: 909, alt: "回序生活重启挑战系统" }],
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "回序｜从混乱，回到自己的节奏",
-    description: "7日清场、21日稳定、50日挑战。",
+    description: "7日清场、21日稳定、50日挑战与自定义挑战。",
     images: ["/og.png"],
   },
   icons: {
