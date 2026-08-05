@@ -32,13 +32,18 @@ test("keeps fixed routes isolated and adds the custom route explicitly", async (
   assert.match(app, /自定义挑战/);
   assert.match(app, /3—50天/);
   assert.doesNotMatch(app, /不限期挑战|isUnlimited/);
-  assert.match(app, /schemaVersion: 7/);
+  assert.match(app, /schemaVersion: 8/);
   assert.match(app, /challengeType, customConfig/);
   assert.match(app, /pausedAt, pausedDays/);
+  assert.match(app, /window\.addEventListener\("pageshow", resume\)/);
+  assert.match(app, /setDay\(expectedDay\)/);
+  assert.doesNotMatch(app, /window\.location\.reload\(\);\s*return true/);
+  assert.match(app, /queueIndexedStateWrite\(state\)/);
+  assert.match(app, /chooseNewestState/);
 });
 
 test("challenge clock follows local dates, pauses elapsed days, and detects the final boundary", async () => {
-  const { challengeElapsedDays, challengeHasEnded, dateKeyAfter, localDateKey, pausedDaysAfterResume } = await import("../app/challengeClock.ts");
+  const { challengeDateTransition, challengeDayForDate, challengeElapsedDays, challengeHasEnded, dateKeyAfter, localDateKey, pausedDaysAfterResume } = await import("../app/challengeClock.ts");
   const earlyMorning = new Date(2026, 7, 5, 4, 0, 0);
   assert.equal(localDateKey(earlyMorning), "2026-08-05");
   assert.equal(dateKeyAfter(earlyMorning, 1), "2026-08-06");
@@ -47,6 +52,13 @@ test("challenge clock follows local dates, pauses elapsed days, and detects the 
   const resumed = new Date(2026, 7, 5, 8, 0, 0);
   assert.equal(pausedDaysAfterResume(0, "2026-08-02", resumed), 3);
   assert.equal(challengeElapsedDays(start, resumed, 3), 1);
+  assert.equal(challengeDayForDate(start, resumed, 3, 21), 2);
+  assert.equal(challengeDayForDate(start, new Date(2026, 8, 30), 0, 21), 21);
+  assert.deepEqual(challengeDateTransition(1, start, new Date(2026, 7, 2, 8), 0, 7), { expectedDay: 2, ended: false, shouldAdvance: true, lastDayToRecord: 1 });
+  assert.deepEqual(challengeDateTransition(1, start, new Date(2026, 7, 5, 8), 0, 7), { expectedDay: 5, ended: false, shouldAdvance: true, lastDayToRecord: 4 });
+  assert.deepEqual(challengeDateTransition(1, start, new Date(2026, 7, 5, 8), 2, 7), { expectedDay: 3, ended: false, shouldAdvance: true, lastDayToRecord: 2 });
+  assert.deepEqual(challengeDateTransition(1, start, new Date(2026, 7, 4, 8), 0, 3), { expectedDay: 3, ended: true, shouldAdvance: true, lastDayToRecord: 3 });
+  assert.deepEqual(challengeDateTransition(2, start, new Date(2026, 7, 2, 8), 0, 7), { expectedDay: 2, ended: false, shouldAdvance: false, lastDayToRecord: 1 });
   assert.equal(challengeHasEnded(start, new Date(2026, 7, 4, 0, 0), 0, 3), true);
   assert.equal(challengeHasEnded(start, new Date(2026, 7, 3, 23, 59, 0), 0, 3), false);
 });

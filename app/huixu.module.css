@@ -232,6 +232,168 @@
 .aboutHero h2 { margin: 5px 0; font-size: 23px; font-weight: 620; }
 .aboutHero p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 
+.aboutLetter {
+  display: grid;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+.aboutCard {
+  padding: 24px 21px;
+  border: 1px solid rgba(145,157,184,.12);
+  border-radius: 24px;
+  background: rgba(255,255,255,.58);
+  box-shadow: 0 12px 32px rgba(92,105,145,.055);
+}
+
+.aboutIntroCard {
+  padding: 29px 23px;
+  border-color: rgba(255,255,255,.88);
+  background: linear-gradient(138deg, rgba(235,247,254,.84), rgba(247,247,253,.76) 48%, rgba(244,237,251,.8));
+}
+
+.aboutCard > h2,
+.aboutDataCard h2 {
+  margin: 0 0 19px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -.02em;
+}
+
+.aboutIntroCard > h2 {
+  margin-bottom: 26px;
+  font-size: 27px;
+  line-height: 1.35;
+  font-weight: 610;
+}
+
+.aboutProse {
+  display: grid;
+  gap: 14px;
+}
+
+.aboutProse p,
+.aboutDataCard > p,
+.aboutQuietNote p {
+  margin: 0;
+  color: #68758e;
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.aboutProse strong {
+  color: #6577a2;
+  font-weight: 640;
+}
+
+.aboutRituals {
+  display: grid;
+  gap: 8px;
+  margin: 3px 0;
+  padding: 16px 17px;
+  border-radius: 17px;
+  color: #67799e;
+  background: rgba(255,255,255,.5);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.aboutBeliefs {
+  display: grid;
+  gap: 11px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aboutBeliefs li {
+  position: relative;
+  padding-left: 16px;
+  color: #66738d;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.aboutBeliefs li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .72em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #91c6eb, #b2a4e2);
+}
+
+.aboutQuietNote {
+  display: grid;
+  gap: 9px;
+  margin-top: 21px;
+  padding-top: 19px;
+  border-top: 1px solid rgba(145,157,184,.11);
+}
+
+.aboutDataCard header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 18px;
+}
+
+.aboutDataCard h2 { margin: 0; }
+.aboutDataCard > p + p { margin-top: 10px; }
+
+.aboutShield {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 12px;
+  color: #79aeda;
+  background: rgba(224,241,252,.82);
+}
+
+.aboutShield svg {
+  width: 19px;
+  height: 19px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.aboutCard > .primaryButton { margin-top: 22px; }
+
+.aboutClosing {
+  display: grid;
+  gap: 10px;
+  padding: 36px 16px 18px;
+  text-align: center;
+}
+
+.aboutClosing p {
+  margin: 0;
+  color: #7b879d;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.aboutClosing strong {
+  margin-top: 5px;
+  color: #687ba8;
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.aboutClosing small {
+  margin-top: 26px;
+  color: #a1a8b6;
+  font-size: 9px;
+  line-height: 1.7;
+}
+
 .infoSections {
   display: grid;
   gap: 12px;
@@ -1285,6 +1447,27 @@
   font-weight: 650;
 }
 
+.supportIdentity {
+  display: grid;
+  gap: 4px;
+  margin: 18px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(143, 154, 211, .18);
+  border-radius: 14px;
+  color: var(--ink);
+  background: rgba(247, 249, 255, .82);
+}
+
+.supportIdentity b {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.supportIdentity span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .recordTaskList {
   display: grid;
   gap: 7px;
@@ -2030,7 +2213,8 @@
 
 @supports (-webkit-touch-callout: none) {
   textarea,
-  input { font-size: 16px; }
+  input,
+  select { font-size: 16px !important; }
 }
 
 html {
@@ -2236,30 +2420,43 @@ html {
 .lifeSparkEntry > i { color: #7b8db8; font-size: 9px; font-style: normal; white-space: nowrap; }
 
 .lifeSparkShell {
-  --spark-1: #9ecceb;
-  --spark-2: #b6a2df;
-  --spark-3: #a9d7d2;
-  --spark-4: #e5b8cd;
-  --spark-5: #f0cb9f;
-  --spark-6: #aebee6;
-  --spark-7: #9bd0bb;
-  --spark-8: #d4b5e6;
-  --spark-9: #b8d5ee;
-  --spark-10: #e5bad6;
+  --spark-1: #c4e0f4;
+  --spark-2: #cbdcf3;
+  --spark-3: #d4d5f2;
+  --spark-4: #ddd2f1;
+  --spark-5: #e3d8f3;
+  --spark-6: #d8dcf5;
+  --spark-7: #cce3f3;
+  --spark-8: #d5e6f5;
+  --spark-9: #d9dcf2;
+  --spark-10: #cbd5ef;
   height: min(820px, 100dvh);
   overflow-y: auto;
-  padding: 24px 24px 34px;
+  padding: 24px 24px 30px;
   background:
     radial-gradient(circle at 12% 15%, rgba(191,223,244,.28), transparent 30%),
     radial-gradient(circle at 88% 30%, rgba(219,199,239,.28), transparent 31%),
     #f7f9fd;
 }
 
+.lifeSparkShell > .pageHeader {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.lifeSparkTitle {
+  margin: 0;
+  font-size: 22px !important;
+  line-height: 1.2;
+  font-weight: 620;
+  letter-spacing: -.02em;
+}
+
 .lifeSparkMiniNav {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin: 4px 0 25px;
+  margin: 22px 0 0;
 }
 
 .lifeSparkMiniNav button {
@@ -2276,20 +2473,14 @@ html {
 .lifeSparkMiniNav small { margin-left: 4px; color: #a0a8b7; font-size: 7px; }
 .lifeSparkMiniNav .lifeSparkMiniActive { color: #7184b4; background: rgba(235,241,250,.9); }
 
-.lifeSparkHeaderCopy { display: grid; gap: 3px; }
-.lifeSparkHeaderCopy p { margin: 0; color: var(--ink); font-size: 10px; line-height: 1.45; font-weight: 560; }
-.lifeSparkHeaderCopy small { color: var(--muted); font-size: 9px; }
-
 .lifeSparkIntro { text-align: center; }
-.lifeSparkIntro > span { color: #8295c2; font-size: 9px; letter-spacing: .15em; }
-.lifeSparkIntro h2 { margin: 9px 0 8px; font-size: 21px; font-weight: 610; letter-spacing: -.025em; }
-.lifeSparkIntro p { max-width: 290px; margin: 0 auto; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.lifeSparkIntro h2 { margin: 0; font-size: 19px; font-weight: 450; letter-spacing: -.018em; }
 
 .lifeSparkWheelArea {
   position: relative;
-  width: min(280px, 78vw);
+  width: min(306px, 82vw);
   aspect-ratio: 1;
-  margin: 29px auto 20px;
+  margin: 25px auto 18px;
   display: grid;
   place-items: center;
 }
@@ -2308,7 +2499,7 @@ html {
     var(--spark-7) 216deg 252deg, var(--spark-8) 252deg 288deg,
     var(--spark-9) 288deg 324deg, var(--spark-10) 324deg 360deg
   );
-  box-shadow: 0 24px 55px rgba(88,104,148,.16), inset 0 0 0 2px rgba(255,255,255,.42);
+  box-shadow: 0 28px 62px rgba(79,95,139,.19), inset 0 0 0 2px rgba(255,255,255,.46);
   transition-property: transform;
   transition-timing-function: cubic-bezier(.18,.72,.2,1);
   will-change: transform;
@@ -2329,13 +2520,14 @@ html {
   z-index: 1;
   left: 50%;
   top: 50%;
-  width: 54px;
-  margin: -6px 0 0 -27px;
-  color: rgba(255,255,255,.96);
-  font-size: 7px;
-  line-height: 1.2;
+  width: 68px;
+  margin: -7px 0 0 -34px;
+  color: #6f7e9f;
+  font-size: 9px;
+  font-weight: 560;
+  line-height: 1.25;
   text-align: center;
-  text-shadow: 0 1px 3px rgba(72,83,120,.2);
+  text-shadow: 0 1px 0 rgba(255,255,255,.7);
   white-space: nowrap;
 }
 .lifeSparkWheelSpinning { filter: saturate(1.05); }
@@ -2355,8 +2547,8 @@ html {
 .lifeSparkCenterButton {
   position: relative;
   z-index: 5;
-  width: 92px;
-  height: 92px;
+  width: 94px;
+  height: 94px;
   display: grid;
   place-items: center;
   border: 6px solid rgba(255,255,255,.82);
@@ -2375,13 +2567,37 @@ html {
 .lifeSparkSpinningText { margin: 4px 0 0; color: #8d98ae; text-align: center; font-size: 9px; }
 
 .lifeSparkFooter {
-  margin: 30px 0 0;
-  padding: 12px;
-  border-radius: 14px;
-  color: #969eaf;
-  background: rgba(255,255,255,.45);
-  text-align: center;
-  font-size: 8px;
+  display: grid;
+  gap: 0;
+  margin: 12px 0 0;
+  padding: 0 16px;
+  border: 1px solid rgba(145,157,184,.1);
+  border-radius: 18px;
+  color: #7f899d;
+  background: rgba(255,255,255,.52);
+  text-align: left;
+}
+
+.lifeSparkFooter p {
+  margin: 0;
+  padding: 13px 0;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.lifeSparkFooter p + p {
+  border-top: 1px solid rgba(137,151,183,.11);
+  color: #9099aa;
+  font-size: 10px;
+}
+
+.lifeSparkFooter b {
+  display: inline-block;
+  margin-right: 7px;
+  color: #7486b1;
+  font-size: 9px;
+  font-weight: 620;
+  letter-spacing: .05em;
 }
 
 .lifeSparkResult { text-align: center; }
@@ -2409,13 +2625,20 @@ html {
 .lifeSparkRemove { padding: 7px; border: 0; color: #969faf; background: transparent; font-size: 8px; }
 
 @media (max-width: 520px) {
+  textarea,
+  select,
+  input:not([type="checkbox"]):not([type="radio"]) {
+    font-size: 16px !important;
+  }
+
   .lifeSparkShell { width: 100%; height: 100dvh; min-height: 100dvh; border: 0; border-radius: 0; padding-top: max(24px, calc(env(safe-area-inset-top) + 10px)); padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 18px)); }
   .lifeSparkEntry { margin-bottom: 10px; }
 }
 
 @media (max-width: 350px) {
   .lifeSparkEntry { grid-template-columns: 30px 1fr auto; }
-  .lifeSparkWheelArea { width: min(250px, 78vw); }
+  .lifeSparkWheelArea { width: min(270px, 80vw); }
+  .lifeSparkWheelLabel { transform-origin: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

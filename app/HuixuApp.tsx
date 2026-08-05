@@ -36,6 +36,7 @@ import {
 } from "./lifeSparkData";
 import {
   calendarDayDifference,
+  challengeDateTransition,
   challengeElapsedDays,
   challengeHasEnded,
   dateKeyAfter,
@@ -104,6 +105,8 @@ type CustomDraft = {
 
 const storageKey = "huixu-v1-state";
 const feedbackUrl = "https://ucn5152u7qk7.feishu.cn/share/base/form/shrcnFBlXn4XxkRGsAdwJx06C2f";
+const supportUrl = "https://afdian.com/a/qingtaosanhua";
+let indexedStateQueue = Promise.resolve();
 
 function todayKey() {
   return localDateKey(new Date());
@@ -141,6 +144,16 @@ function statusForChallengeDay(type: ChallengeType, route: RouteKey, config: Cus
 
 function stageForChallengeDay(type: ChallengeType, route: RouteKey, targetDay: number) {
   return type === "custom" ? `DAY ${String(targetDay).padStart(2, "0")}` : getStageLabel(route, targetDay);
+}
+
+function chooseNewestState(indexed: unknown, local: unknown) {
+  const indexedState = indexed && typeof indexed === "object" ? indexed as Record<string, unknown> : null;
+  const localState = local && typeof local === "object" ? local as Record<string, unknown> : null;
+  if (!indexedState) return localState;
+  if (!localState) return indexedState;
+  const indexedUpdatedAt = Number(indexedState.stateUpdatedAt ?? 0);
+  const localUpdatedAt = Number(localState.stateUpdatedAt ?? 0);
+  return localUpdatedAt >= indexedUpdatedAt ? localState : indexedState;
 }
 
 function BrandOrbit({ compact = false }: { compact?: boolean }) {
@@ -213,7 +226,9 @@ export default function HuixuApp() {
   const [undoUntil, setUndoUntil] = useState(0);
   const [pausedAt, setPausedAt] = useState("");
   const [pausedDays, setPausedDays] = useState(0);
+  const [clockDate, setClockDate] = useState(() => todayKey());
   const [now, setNow] = useState(() => Date.now());
+  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
   const [endingOpen, setEndingOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState<ChallengeArchive | null>(null);
   const [archiveRecordOpen, setArchiveRecordOpen] = useState<DailyRecord | null>(null);
@@ -223,6 +238,7 @@ export default function HuixuApp() {
   const [analyticsPromptSeen, setAnalyticsPromptSeen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [installGuideOpen, setInstallGuideOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [appInstalled, setAppInstalled] = useState(false);
   const [clearDataOpen, setClearDataOpen] = useState(false);
   const [clearDataAcknowledged, setClearDataAcknowledged] = useState(false);
@@ -230,15 +246,18 @@ export default function HuixuApp() {
   const [supplementText, setSupplementText] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
   const lifeSparkTimerRef = useRef<number>(0);
+  const stateRevisionRef = useRef(0);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
         const indexed = await readIndexedState();
-        const raw = indexed ? JSON.stringify(indexed) : localStorage.getItem(storageKey);
-        if (raw && active) {
-          const saved = JSON.parse(raw);
+        const localRaw = localStorage.getItem(storageKey);
+        const local = localRaw ? JSON.parse(localRaw) : null;
+        const saved = chooseNewestState(indexed, local) as any;
+        if (saved && active) {
+          stateRevisionRef.current = Number(saved.stateRevision ?? 0);
           const savedRoute: RouteKey = saved.route ?? "21";
           const savedChallengeType: ChallengeType = saved.challengeType === "custom" && saved.customConfig ? "custom" : "fixed";
           const savedHistory: DailyRecord[] = saved.history ?? [];
@@ -367,12 +386,37 @@ export default function HuixuApp() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const state = { screen, route, challengeType, customConfig, customDraft, customStep, lifeSparkData, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, pausedAt, pausedDays, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, schemaVersion: 7 };
+    const stateRevision = stateRevisionRef.current + 1;
+    stateRevisionRef.current = stateRevision;
+    const state = { screen, route, challengeType, customConfig, customDraft, customStep, lifeSparkData, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, pausedAt, pausedDays, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, stateRevision, stateUpdatedAt: Date.now(), schemaVersion: 8 };
     localStorage.setItem(storageKey, JSON.stringify(state));
-    void writeIndexedState(state);
+    void queueIndexedStateWrite(state);
   }, [screen, route, challengeType, customConfig, customDraft, customStep, lifeSparkData, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, pausedAt, pausedDays, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, hydrated]);
 
   useEffect(() => () => window.clearTimeout(lifeSparkTimerRef.current), []);
+
+  useEffect(() => {
+    let timer = 0;
+    const refreshClock = () => setClockDate(todayKey());
+    const scheduleNextMidnight = () => {
+      window.clearTimeout(timer);
+      refreshClock();
+      const nextMidnight = new Date();
+      nextMidnight.setHours(24, 0, 0, 250);
+      timer = window.setTimeout(scheduleNextMidnight, Math.max(250, nextMidnight.getTime() - Date.now()));
+    };
+    const resume = () => { if (document.visibilityState === "visible") scheduleNextMidnight(); };
+    scheduleNextMidnight();
+    window.addEventListener("focus", resume);
+    window.addEventListener("pageshow", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("pageshow", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, []);
 
   useEffect(() => {
     if (!hydrated || lifecycle !== "preparing" || !scheduledDate || todayKey() < scheduledDate) return;
@@ -380,7 +424,7 @@ export default function HuixuApp() {
     setStartedAt(start);
     setLifecycle("active");
     if (customConfig) setCustomConfig({ ...customConfig, challengeStatus: "active", updatedAt: new Date().toISOString() });
-  }, [hydrated, lifecycle, scheduledDate, customConfig]);
+  }, [hydrated, lifecycle, scheduledDate, customConfig, clockDate]);
 
   useEffect(() => {
     if (challengeType !== "custom" || !customConfig) return;
@@ -391,33 +435,80 @@ export default function HuixuApp() {
   useEffect(() => {
     const totalDays = challengeTotalDays(challengeType, route, customConfig);
     if (!hydrated || lifecycle !== "active" || !startedAt) return;
-    let timer = 0;
-    const advanceWhenDateChanges = () => {
-      const elapsedDays = challengeElapsedDays(startedAt, new Date(), pausedDays);
-      const expectedDay = Math.min(totalDays, elapsedDays + 1);
-      if (expectedDay > day || elapsedDays >= totalDays) {
-        window.location.reload();
-        return true;
-      }
-      return false;
-    };
-    const scheduleMidnightCheck = () => {
-      window.clearTimeout(timer);
-      if (advanceWhenDateChanges()) return;
-      const nextMidnight = new Date();
-      nextMidnight.setHours(24, 0, 0, 750);
-      timer = window.setTimeout(scheduleMidnightCheck, nextMidnight.getTime() - Date.now());
-    };
-    const resume = () => { if (document.visibilityState === "visible") scheduleMidnightCheck(); };
-    scheduleMidnightCheck();
-    window.addEventListener("focus", resume);
-    document.addEventListener("visibilitychange", resume);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("focus", resume);
-      document.removeEventListener("visibilitychange", resume);
-    };
-  }, [hydrated, lifecycle, startedAt, pausedDays, day, route, challengeType, customConfig]);
+    const currentDate = new Date(`${clockDate}T12:00:00`);
+    const transition = challengeDateTransition(day, startedAt, currentDate, pausedDays, totalDays);
+    if (!transition.shouldAdvance) return;
+    const { expectedDay, lastDayToRecord, ended: endedByDate } = transition;
+    const nowIso = new Date().toISOString();
+    const tasksAt = (targetDay: number) => challengeType === "custom"
+      ? tasksForChallengeDay("custom", route, customConfig, targetDay)
+      : configuredTasks(route, targetDay);
+
+    const nextRecords = [...history];
+    for (let missedDay = day; missedDay <= lastDayToRecord; missedDay += 1) {
+      if (nextRecords.some((record) => record.day === missedDay)) continue;
+      const isVisibleDay = missedDay === day;
+      const tasks: Checkin[] = isVisibleDay ? checkins : tasksAt(missedDay).map((task) => ({ ...task, done: false }));
+      const doneIds = isVisibleDay ? checkins.filter((item) => item.done).map((item) => item.id) : [];
+      const hasContent = isVisibleDay && (doneIds.length > 0 || Boolean(note.trim()) || Object.keys(taskNotes).length > 0 || skippedIds.length > 0);
+      const result = hasContent ? statusForChallengeDay(challengeType, route, customConfig, tasks, doneIds, missedDay) : null;
+      const recordDate = new Date(startedAt);
+      recordDate.setDate(recordDate.getDate() + missedDay - 1 + pausedDays);
+      nextRecords.push({
+        day: missedDay,
+        date: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(recordDate),
+        status: result?.label || (challengeType === "custom" ? "未达标日" : "未记录"),
+        statusKey: result?.key || (challengeType === "custom" ? "failed" : "unrecorded"),
+        counted: result?.counted ?? false,
+        doneIds,
+        skippedIds: tasks.filter((task) => !doneIds.includes(task.id)).map((task) => task.id),
+        note: hasContent ? note : "",
+        stage: stageForChallengeDay(challengeType, route, missedDay),
+        taskNotes: hasContent ? taskNotes : {},
+        completedAt: recordDate.toISOString(),
+        tasks: tasks.map(({ done: _done, ...task }) => task),
+        rulesVersion: challengeRulesVersion,
+        scheduledTaskIds: tasks.map((task) => task.id),
+        completedTaskIds: doneIds,
+        totalTaskCount: tasks.length,
+        completedTaskCount: doneIds.length,
+        requiredCompletedCount: challengeType === "custom" ? customRequiredCount(tasks.length, customConfig?.dailyThresholdRule.allowedMisses ?? 0) : undefined,
+        dayStatus: challengeType === "custom" ? (result?.key || "failed") as DailyRecord["dayStatus"] : undefined,
+      });
+    }
+    nextRecords.sort((a, b) => a.day - b.day);
+    setHistory(nextRecords);
+    if (endedByDate && challengeId) {
+      const finishedConfig = customConfig ? { ...customConfig, currentDay: totalDays, challengeStatus: "finished" as const, updatedAt: nowIso } : null;
+      setArchives((items) => [{
+        id: challengeId,
+        route,
+        status: "finished",
+        startedAt,
+        endedAt: nowIso,
+        history: nextRecords,
+        settings: challengeSettings,
+        rulesVersion: challengeRulesVersion,
+        challengeType,
+        customConfig: finishedConfig,
+      }, ...items.filter((item) => item.id !== challengeId)]);
+    }
+
+    setUndoUntil(0);
+    setNote("");
+    setTaskNotes({});
+    setSkippedIds([]);
+    setSettled(false);
+    if (endedByDate) {
+      setDay(totalDays);
+      setLifecycle("finished");
+      if (customConfig) setCustomConfig({ ...customConfig, currentDay: totalDays, challengeStatus: "finished", updatedAt: nowIso });
+      return;
+    }
+    setDay(expectedDay);
+    setCheckins(tasksAt(expectedDay).map((task) => ({ ...task, done: false })));
+    if (customConfig) setCustomConfig({ ...customConfig, currentDay: expectedDay, challengeStatus: "active", updatedAt: nowIso });
+  }, [hydrated, lifecycle, startedAt, pausedDays, day, route, challengeType, customConfig, clockDate]);
 
   useEffect(() => {
     if (!undoUntil || undoUntil <= Date.now()) return;
@@ -597,8 +688,8 @@ export default function HuixuApp() {
     const isEvening = kind === "evening";
     await registration.showNotification(kind === "test" ? "回序 · 测试提醒" : isEvening ? "回序 · 晚间收尾" : "回序 · 今天", {
       body: kind === "test" ? "系统提醒已成功开启。之后会按你设置的时间出现。" : isEvening ? "今天的记录还没有结束，需要时可以回来继续。" : "今天的挑战已经准备好，从能承受的一件事开始。",
-      icon: "/icon-v2-192.png",
-      badge: "/icon-v2-192.png",
+      icon: "/icon-v3-192.png",
+      badge: "/icon-v3-192.png",
       tag: `huixu-${kind}`,
       data: { url: "/" },
     });
@@ -736,11 +827,12 @@ export default function HuixuApp() {
         if (!saved.route || !saved.checkins || !Array.isArray(saved.history)) throw new Error();
         const mode = window.prompt(`备份包含 ${saved.history.length} 条当前记录、${saved.archives?.length ?? 0} 轮归档。\n输入“合并”保留本机归档，输入“替换”使用备份覆盖。`, "合并");
         if (mode !== "合并" && mode !== "替换") return;
-        const restored = mode === "合并"
+        const restoredBase = mode === "合并"
           ? { ...saved, archives: [...(saved.archives ?? []), ...archives.filter((local) => !(saved.archives ?? []).some((remote: ChallengeArchive) => remote.id === local.id))] }
           : saved;
+        const restored = { ...restoredBase, stateRevision: Number(restoredBase.stateRevision ?? 0) + 1, stateUpdatedAt: Date.now(), schemaVersion: 8 };
         localStorage.setItem(storageKey, JSON.stringify(restored));
-        void writeIndexedState(restored).then(() => window.location.reload());
+        void queueIndexedStateWrite(restored).then(() => window.location.reload());
       } catch {
         showToast("这不是有效的回序备份");
       }
@@ -929,7 +1021,7 @@ export default function HuixuApp() {
 
   function clearAllData() {
     localStorage.removeItem(storageKey);
-    void clearIndexedState().then(() => window.location.reload());
+    void queueIndexedStateClear().then(() => window.location.reload());
   }
 
   function settleToday() {
@@ -1006,6 +1098,7 @@ export default function HuixuApp() {
   function pauseChallenge() {
     setPausedAt(todayKey());
     setLifecycle("paused");
+    setPauseConfirmOpen(false);
   }
 
   function resumeChallenge() {
@@ -1437,21 +1530,16 @@ export default function HuixuApp() {
         <section className={`${styles.phoneShell} ${styles.lifeSparkShell}`}>
           <header className={styles.pageHeader}>
             <button className={styles.iconButton} onClick={lifeSparkView === "wheel" ? closeLifeSpark : () => setLifeSparkView("wheel")} aria-label={lifeSparkView === "wheel" ? "返回今天" : "返回转盘"}>‹</button>
-            <div className={styles.lifeSparkHeaderCopy}><p>生活不止有需要完成的事，也有一些值得试试的小事。</p><small>不是任务，想做就试试看。</small></div>
+            <h1 className={styles.lifeSparkTitle}>生活盲盒</h1>
           </header>
-          <div className={styles.lifeSparkMiniNav}>
-            <button className={lifeSparkView === "favorites" ? styles.lifeSparkMiniActive : ""} onClick={() => setLifeSparkView(lifeSparkView === "favorites" ? "wheel" : "favorites")}><span>♡</span> 我的收藏 <small>{lifeSparkData.favorites.length}</small></button>
-            <button className={lifeSparkView === "tried" ? styles.lifeSparkMiniActive : ""} onClick={() => setLifeSparkView(lifeSparkView === "tried" ? "wheel" : "tried")}><span>✦</span> 我试过的 <small>{lifeSparkData.triedItems.length}</small></button>
-          </div>
-
           {lifeSparkView === "wheel" ? <>
-            <section className={styles.lifeSparkIntro}><span>生活盲盒</span><h2>今天，要给生活加点什么？</h2><p>没有正确答案，也不用把它变成新的待办。抽到不合适的，换一个就好。</p></section>
+            <section className={styles.lifeSparkIntro}><h2>今天，要给生活加点什么？</h2></section>
             <div className={styles.lifeSparkWheelArea}>
               <i className={styles.lifeSparkPointer} />
               <div className={`${styles.lifeSparkWheel} ${lifeSparkSpinning ? styles.lifeSparkWheelSpinning : ""}`} style={{ transform: `rotate(${lifeSparkRotation}deg)`, transitionDuration: `${lifeSparkSpinDuration}ms` }} aria-hidden="true">
                 {lifeSparkCategories.map((category, index) => {
                   const angle = index * 36 + 18;
-                  return <span className={styles.lifeSparkWheelLabel} key={category.category} style={{ transform: `rotate(${angle}deg) translateY(-104px) rotate(${-angle}deg)` }}>{category.categoryName}</span>;
+                  return <span className={styles.lifeSparkWheelLabel} key={category.category} style={{ transform: `rotate(${angle}deg) translateY(-116px) rotate(${-angle}deg)` }}>{category.categoryName}</span>;
                 })}
               </div>
               <button className={styles.lifeSparkCenterButton} onClick={() => runLifeSparkDraw(false)} disabled={lifeSparkSpinning}>{lifeSparkSpinning ? "抽取中…" : "抽一个\n试试"}</button>
@@ -1469,7 +1557,15 @@ export default function HuixuApp() {
             </div>
           </section>}
 
-          <footer className={styles.lifeSparkFooter}>它不是挑战，也不会影响今日达标和连续天数。</footer>
+          <nav className={styles.lifeSparkMiniNav} aria-label="生活盲盒个人内容">
+            <button className={lifeSparkView === "favorites" ? styles.lifeSparkMiniActive : ""} onClick={() => setLifeSparkView(lifeSparkView === "favorites" ? "wheel" : "favorites")}><span>♡</span> 我的收藏 <small>{lifeSparkData.favorites.length}</small></button>
+            <button className={lifeSparkView === "tried" ? styles.lifeSparkMiniActive : ""} onClick={() => setLifeSparkView(lifeSparkView === "tried" ? "wheel" : "tried")}><span>✦</span> 我试过的 <small>{lifeSparkData.triedItems.length}</small></button>
+          </nav>
+
+          <footer className={styles.lifeSparkFooter}>
+            <p>生活不只有需要完成的事，也值得加入一些有趣、温柔或新鲜的小事。</p>
+            <p><b>不影响挑战</b>这里没有正确答案，也不会计入打卡、达标或连续天数；抽到不合适的，换一个就好。</p>
+          </footer>
 
           {lifeSparkResult && <div className={styles.sheetBackdrop} onClick={() => setLifeSparkResult(null)}>
             <section className={`${styles.detailSheet} ${styles.lifeSparkResult}`} role="dialog" aria-modal="true" aria-label="生活盲盒结果" onClick={(event) => event.stopPropagation()}>
@@ -1500,19 +1596,61 @@ export default function HuixuApp() {
             <button className={styles.iconButton} onClick={() => { setScreen("app"); setTab("me"); }} aria-label="返回">‹</button>
             <div><h1>关于回序</h1></div>
           </header>
-          <section className={styles.aboutHero}>
-            <BrandOrbit compact />
-            <div><small>从混乱，回到自己的节奏</small><h2>回序</h2><p>一套不依赖账号、以真实生活为起点的渐进式挑战系统。</p></div>
-          </section>
-          <div className={styles.infoSections}>
-            <section><h2>为什么做回序</h2><p>生活混乱时，人往往不需要更多目标，而需要一个可以重新开始的顺序。回序不要求连续打卡，也不把中断视为失败，只帮助你看清今天真实完成了什么。</p></section>
-            <section><h2>四条挑战路线</h2><ul><li><b>7日清场</b>：先清理眼前最真实的阻力。</li><li><b>21日稳定</b>：建立起床、活动和注意力的基本节奏。</li><li><b>50日挑战</b>：长期实践一套更完整的生活规则。</li><li><b>自定义挑战</b>：在3—50天内安排自己的任务、目标和生活节律。</li></ul></section>
-            <section><h2>产品原则</h2><ul><li>严格记录事实，温柔对待结果。</li><li>中断不会让已经发生的行动归零。</li><li>基础生活优先，不制造新的完成压力。</li></ul></section>
-            <section><h2>数据与隐私</h2><p>回序不要求注册登录。每日记录、挑战内容和时间设置默认只保存在这台设备上；匿名统计未接入时不会发送任何数据，接入后也不会上传你的文字记录。</p></section>
-            <section><h2>免费与开源</h2><p>回序计划以免费、非商业化和开源的方式持续迭代，希望让更多人能够使用、讨论和改进它。</p></section>
+          <div className={styles.aboutLetter}>
+            <section className={`${styles.aboutCard} ${styles.aboutIntroCard}`}>
+              <h2>把生活，慢慢过回来。</h2>
+              <div className={styles.aboutProse}>
+                <p>你好，欢迎来到回序。</p>
+                <p><strong>回序，意为回归生活的秩序。</strong></p>
+                <p>我们生活在一个不断强调效率、成长和自我优化的环境里。</p>
+                <p>人们努力完成更多目标，学习更多知识，希望成为一个更优秀的人。</p>
+                <p>但很多时候，真正需要恢复的，并不是效率，而是生活本身。</p>
+                <div className={styles.aboutRituals}>
+                  <span>规律地起床。</span><span>好好吃一顿饭。</span><span>喝水。</span><span>活动身体。</span><span>整理房间。</span><span>记录今天发生的事。</span>
+                </div>
+                <p>这些看似普通的小事，往往才是一段生活重新稳定下来的开始。</p>
+                <p>回序希望陪你一点一点，把生活慢慢过回来。</p>
+              </div>
+            </section>
+
+            <section className={styles.aboutCard}>
+              <h2>回序相信</h2>
+              <ul className={styles.aboutBeliefs}>
+                <li>身体状态，比效率更重要。</li>
+                <li>基础生活，比额外成长更重要。</li>
+                <li>稳定重复，比短期爆发更重要。</li>
+                <li>可持续，比完美完成更重要。</li>
+                <li>真实的生活，比漂亮的数据更重要。</li>
+              </ul>
+              <div className={styles.aboutQuietNote}><p>回序不会催促你成为一个更优秀的人。</p><p>它只是希望，在需要的时候，陪你慢慢找回属于自己的生活节律。</p></div>
+            </section>
+
+            <section className={`${styles.aboutCard} ${styles.aboutDataCard}`}>
+              <header><span className={styles.aboutShield} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5 19 6v5.5c0 4.3-2.8 7.4-7 9-4.2-1.6-7-4.7-7-9V6l7-2.5Z"/><path d="m9.2 12 1.8 1.8 3.9-4"/></svg></span><h2>关于你的数据</h2></header>
+              <p>你的所有数据都保存在设备本地。</p>
+              <p>开发者无法查看、收集或上传你的任何记录、日记或打卡内容。</p>
+              <p>如果需要更换设备，请记得提前导出备份。</p>
+            </section>
+
+            <section className={styles.aboutCard}>
+              <h2>关于反馈</h2>
+              <div className={styles.aboutProse}>
+                <p>如果你有新的想法、建议，或者发现了 Bug，欢迎告诉我。</p>
+                <p>我会认真阅读每一条反馈。</p>
+                <p>但并不是所有建议都会加入产品。</p>
+                <p>每一次更新，我都会结合产品理念、长期规划以及维护成本认真考虑，希望回序始终保持简单、克制，也真正有用。</p>
+              </div>
+              <button className={styles.primaryButton} onClick={() => setScreen("feedback")}>反馈与建议</button>
+            </section>
+
+            <footer className={styles.aboutClosing}>
+              <p>谢谢你来到这里。</p>
+              <p>也谢谢你愿意让回序陪伴你的生活。</p>
+              <p>愿我们都能慢一点。</p>
+              <strong>把生活，慢慢过回来。</strong>
+              <small>当生活重新有了秩序，很多成长都会自然发生。</small>
+            </footer>
           </div>
-          <button className={styles.primaryButton} onClick={() => setScreen("feedback")}>反馈与建议</button>
-          <p className={styles.versionNote}>当前版本 0.1.0</p>
         </section>
       </main>
     );
@@ -1794,7 +1932,7 @@ export default function HuixuApp() {
                       return;
                     }
                     if (lifecycle === "paused") resumeChallenge();
-                    else pauseChallenge();
+                    else setPauseConfirmOpen(true);
                   }}>
                     <span>{lifecycle === "paused" ? "▶" : "Ⅱ"}</span>
                     <div><b>{lifecycle === "paused" ? "恢复挑战" : "暂停挑战"}</b><small>{lifecycle === "paused" ? "从当前挑战日继续" : "暂停期间不生成新的挑战日"}</small></div>
@@ -1834,7 +1972,8 @@ export default function HuixuApp() {
                   setAnalyticsPromptSeen(true);
                 }}><span>◉</span><div><b>匿名使用统计</b><small>{!analyticsAvailable ? "尚未接入 · 当前不会发送数据" : analyticsConsent === "accepted" ? "已开启 · 点击关闭" : "已关闭 · 点击开启"}</small></div></button>
                 <button onClick={() => setScreen("feedback")}><span>✦</span><div><b>反馈与建议</b><small>填写回序用户满意度调查</small></div></button>
-                <button onClick={() => setScreen("about")}><span>序</span><div><b>关于回序</b><small>了解产品理念、隐私与开源计划</small></div></button>
+                <button onClick={() => setSupportOpen(true)}><span>♡</span><div><b>支持回序</b><small>自愿打赏，帮助回序继续维护</small></div></button>
+                <button onClick={() => setScreen("about")}><span>序</span><div><b>关于回序</b><small>了解产品理念、隐私与反馈</small></div></button>
               </div>
             </section>
             <section className={`${styles.settingsSection} ${styles.dangerSection}`}>
@@ -1950,6 +2089,16 @@ export default function HuixuApp() {
             </section>
           </div>
         )}
+        {pauseConfirmOpen && (
+          <div className={styles.sheetBackdrop} onClick={() => setPauseConfirmOpen(false)}>
+            <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="确认暂停挑战" onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} /><small>暂停挑战</small><h2>确定要暂停这轮挑战吗？</h2>
+              <p>暂停期间不会生成新的挑战日，当前进度和已有记录都会保留。准备好后，可以随时从当前挑战日继续。</p>
+              <button className={styles.primaryButton} onClick={pauseChallenge}>确认暂停挑战</button>
+              <button className={styles.textButton} onClick={() => setPauseConfirmOpen(false)}>继续当前挑战</button>
+            </section>
+          </div>
+        )}
         {endingOpen && (
           <div className={styles.sheetBackdrop} onClick={() => setEndingOpen(false)}>
             <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="提前结束挑战" onClick={(event) => event.stopPropagation()}>
@@ -1996,6 +2145,23 @@ export default function HuixuApp() {
               <div className={styles.sheetHandle} /><small>安装到桌面</small><h2>把回序放到主屏幕</h2>
               <p>iPhone／iPad：使用 Safari 打开回序，点击底部“分享”，再选择“添加到主屏幕”。其他浏览器可以在菜单中选择“安装应用”或“添加到主屏幕”。</p>
               <button className={styles.primaryButton} onClick={() => setInstallGuideOpen(false)}>知道了</button>
+            </section>
+          </div>
+        )}
+        {supportOpen && (
+          <div className={styles.sheetBackdrop} onClick={() => setSupportOpen(false)}>
+            <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="支持回序" onClick={(event) => event.stopPropagation()}>
+              <div className={styles.sheetHandle} /><small>支持回序</small><h2>谢谢你来到回序</h2>
+              <p>也谢谢你提出的每一个问题。你的每一次使用、每一条建议，都在帮助回序一点点成长。</p>
+              <p>回序目前仍然保持免费试用。如果它对你有所帮助，也欢迎通过爱发电自愿支持开发者。这份支持，会让我有更多时间继续把它做好。</p>
+              <div className={styles.sheetTip}><span>关于打赏</span>打赏只是支持，不会解锁功能，也不是购买服务。我无法承诺具体的更新内容或更新时间，但会在自己的时间和能力范围内，认真维护和持续更新回序。</div>
+              <p>希望它能一直陪伴你，也陪伴更多正在探索自己的人。</p>
+              <div className={styles.supportIdentity}><b>爱发电主页：青桃三花</b><span>请确认打开的域名为 afdian.com</span></div>
+              <button className={styles.primaryButton} onClick={() => {
+                window.open(supportUrl, "_blank", "noopener,noreferrer");
+                setSupportOpen(false);
+              }}>前往爱发电</button>
+              <button className={styles.textButton} onClick={() => setSupportOpen(false)}>暂时不用</button>
             </section>
           </div>
         )}
@@ -2095,6 +2261,11 @@ async function writeIndexedState(state: unknown) {
   });
 }
 
+function queueIndexedStateWrite(state: unknown) {
+  indexedStateQueue = indexedStateQueue.then(() => writeIndexedState(state));
+  return indexedStateQueue;
+}
+
 async function clearIndexedState() {
   const db = await openHuixuDb();
   if (!db) return;
@@ -2104,4 +2275,9 @@ async function clearIndexedState() {
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => resolve();
   });
+}
+
+function queueIndexedStateClear() {
+  indexedStateQueue = indexedStateQueue.then(() => clearIndexedState());
+  return indexedStateQueue;
 }

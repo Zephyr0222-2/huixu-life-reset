@@ -22,6 +22,23 @@ export function challengeElapsedDays(start: string | Date, end: string | Date, p
   return Math.max(0, calendarDayDifference(start, end) - Math.max(0, pausedDays));
 }
 
+export function challengeDayForDate(start: string | Date, now: string | Date, pausedDays: number, totalDays: number) {
+  const safeTotal = Math.max(1, totalDays);
+  return Math.min(safeTotal, challengeElapsedDays(start, now, pausedDays) + 1);
+}
+
+export function challengeDateTransition(currentDay: number, start: string | Date, now: string | Date, pausedDays: number, totalDays: number) {
+  const elapsedDays = challengeElapsedDays(start, now, pausedDays);
+  const expectedDay = challengeDayForDate(start, now, pausedDays, totalDays);
+  const ended = elapsedDays >= Math.max(1, totalDays);
+  return {
+    expectedDay,
+    ended,
+    shouldAdvance: expectedDay > currentDay || ended,
+    lastDayToRecord: ended ? Math.max(1, totalDays) : expectedDay - 1,
+  };
+}
+
 export function pausedDaysAfterResume(pausedDays: number, pausedAt: string, resumedAt: string | Date) {
   if (!pausedAt) return Math.max(0, pausedDays);
   return Math.max(0, pausedDays) + calendarDayDifference(pausedAt, resumedAt);
