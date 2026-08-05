@@ -106,6 +106,10 @@ type CustomDraft = {
 const storageKey = "huixu-v1-state";
 const feedbackUrl = "https://ucn5152u7qk7.feishu.cn/share/base/form/shrcnFBlXn4XxkRGsAdwJx06C2f";
 const supportUrl = "https://afdian.com/a/qingtaosanhua";
+const analyticsScriptId = "huixu-umami-tracker";
+const analyticsScriptUrl = "https://cloud.umami.is/script.js";
+const analyticsWebsiteId = "309e5d89-43ab-4fb0-9493-78dc771f5870";
+const analyticsDomain = "huixu.qingtaolabs.com";
 let indexedStateQueue = Promise.resolve();
 
 function todayKey() {
@@ -393,6 +397,37 @@ export default function HuixuApp() {
     void queueIndexedStateWrite(state);
   }, [screen, route, challengeType, customConfig, customDraft, customStep, lifeSparkData, day, checkins, note, taskNotes, skippedIds, settled, lifecycle, history, startedAt, pausedAt, pausedDays, reminder, challengeSettings, scheduledDate, challengeId, archives, undoUntil, challengeRulesVersion, analyticsConsent, analyticsPromptSeen, hydrated]);
 
+  useEffect(() => {
+    if (!hydrated || analyticsConsent !== "accepted") return;
+    const analyticsWindow = window as Window & { umami?: { track: (event: string, value?: Record<string, string | number>) => void } };
+    const trackSessionOpen = () => {
+      if (!analyticsWindow.umami || window.location.hostname !== analyticsDomain) return;
+      try {
+        if (sessionStorage.getItem("huixu-analytics-session-opened")) return;
+        analyticsWindow.umami.track("app_opened");
+        sessionStorage.setItem("huixu-analytics-session-opened", "1");
+      } catch {
+        analyticsWindow.umami.track("app_opened");
+      }
+    };
+    const existingScript = document.getElementById(analyticsScriptId) as HTMLScriptElement | null;
+    if (existingScript) {
+      if (analyticsWindow.umami) trackSessionOpen();
+      else existingScript.addEventListener("load", trackSessionOpen, { once: true });
+      return () => existingScript.removeEventListener("load", trackSessionOpen);
+    }
+    const script = document.createElement("script");
+    script.id = analyticsScriptId;
+    script.defer = true;
+    script.src = analyticsScriptUrl;
+    script.dataset.websiteId = analyticsWebsiteId;
+    script.dataset.autoTrack = "false";
+    script.dataset.domains = analyticsDomain;
+    script.addEventListener("load", trackSessionOpen, { once: true });
+    document.head.appendChild(script);
+    return () => script.removeEventListener("load", trackSessionOpen);
+  }, [analyticsConsent, hydrated]);
+
   useEffect(() => () => window.clearTimeout(lifeSparkTimerRef.current), []);
 
   useEffect(() => {
@@ -632,7 +667,7 @@ export default function HuixuApp() {
     return matchesText && matchesStatus;
   });
   const undoSeconds = Math.max(0, Math.ceil((undoUntil - now) / 1000));
-  const analyticsAvailable = typeof window !== "undefined" && Boolean((window as Window & { umami?: unknown }).umami);
+  const analyticsAvailable = Boolean(analyticsWebsiteId);
   const calendarCursor = new Date(`${recordMonthCursor}-01T12:00:00`);
   const calendarOffset = (calendarCursor.getDay() + 6) % 7;
   const calendarDays = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 0).getDate();
@@ -1137,6 +1172,7 @@ export default function HuixuApp() {
     setLifeSparkView("wheel");
     setLifeSparkResult(null);
     setScreen("life-spark");
+    trackAnonymousEvent("life_spark_opened");
   }
 
   function closeLifeSpark() {
@@ -1627,8 +1663,9 @@ export default function HuixuApp() {
 
             <section className={`${styles.aboutCard} ${styles.aboutDataCard}`}>
               <header><span className={styles.aboutShield} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5 19 6v5.5c0 4.3-2.8 7.4-7 9-4.2-1.6-7-4.7-7-9V6l7-2.5Z"/><path d="m9.2 12 1.8 1.8 3.9-4"/></svg></span><h2>关于你的数据</h2></header>
-              <p>你的所有数据都保存在设备本地。</p>
+              <p>你的挑战、记录、日记和打卡内容都保存在设备本地。</p>
               <p>开发者无法查看、收集或上传你的任何记录、日记或打卡内容。</p>
+              <p>只有在你明确允许后，回序才会发送有限的匿名功能使用事件；你可以随时在“我的”页面关闭。</p>
               <p>如果需要更换设备，请记得提前导出备份。</p>
             </section>
 

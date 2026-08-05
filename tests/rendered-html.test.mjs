@@ -88,3 +88,19 @@ test("life spark stays separate from check-ins and keeps a structured library", 
   for (const group of ["创作一点", "连接一点", "探索一点", "认识一点", "玩耍一点", "记录一点", "自然一点", "仪式感一点", "放松一点", "新体验一点"]) assert.match(source, new RegExp(group));
   assert.doesNotMatch(source, /difficulty|duration|location|mood/);
 });
+
+test("anonymous analytics loads only after consent and keeps automatic tracking disabled", async () => {
+  const [app, layout, privacy] = await Promise.all([
+    readFile(new URL("app/HuixuApp.tsx", root), "utf8"),
+    readFile(new URL("app/layout.tsx", root), "utf8"),
+    readFile(new URL("PRIVACY.md", root), "utf8"),
+  ]);
+  assert.match(app, /analyticsConsent !== "accepted"/);
+  assert.match(app, /script\.dataset\.autoTrack = "false"/);
+  assert.match(app, /script\.dataset\.domains = analyticsDomain/);
+  assert.match(app, /huixu\.qingtaolabs\.com/);
+  assert.match(app, /life_spark_opened/);
+  assert.doesNotMatch(layout, /cloud\.umami\.is|data-website-id/);
+  assert.match(privacy, /Umami Cloud（欧盟数据区域）/);
+  assert.match(privacy, /用户拒绝或尚未作出选择时，不会发送这些事件/);
+});
