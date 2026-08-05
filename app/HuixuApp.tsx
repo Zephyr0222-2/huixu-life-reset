@@ -110,6 +110,9 @@ const analyticsScriptId = "huixu-umami-tracker";
 const analyticsScriptUrl = "https://cloud.umami.is/script.js";
 const analyticsWebsiteId = "309e5d89-43ab-4fb0-9493-78dc771f5870";
 const analyticsDomain = "huixu.qingtaolabs.com";
+const baiduAnalyticsScriptId = "huixu-baidu-tracker";
+const baiduAnalyticsSiteId = "4e0dca8d470c4d1e78d8e1c283bbfd6c";
+const baiduAnalyticsScriptUrl = `https://hm.baidu.com/hm.js?${baiduAnalyticsSiteId}`;
 let indexedStateQueue = Promise.resolve();
 
 function todayKey() {
@@ -428,6 +431,22 @@ export default function HuixuApp() {
     return () => script.removeEventListener("load", trackSessionOpen);
   }, [analyticsConsent, hydrated]);
 
+  useEffect(() => {
+    if (!hydrated || analyticsConsent !== "accepted" || window.location.hostname !== analyticsDomain) return;
+    const analyticsWindow = window as Window & { _hmt?: Array<Array<string | number>> };
+    analyticsWindow._hmt = analyticsWindow._hmt ?? [];
+    if (!sessionStorage.getItem("huixu-baidu-session-opened")) {
+      analyticsWindow._hmt.push(["_trackEvent", "huixu", "app_opened"]);
+      sessionStorage.setItem("huixu-baidu-session-opened", "1");
+    }
+    if (document.getElementById(baiduAnalyticsScriptId)) return;
+    const script = document.createElement("script");
+    script.id = baiduAnalyticsScriptId;
+    script.async = true;
+    script.src = baiduAnalyticsScriptUrl;
+    document.head.appendChild(script);
+  }, [analyticsConsent, hydrated]);
+
   useEffect(() => () => window.clearTimeout(lifeSparkTimerRef.current), []);
 
   useEffect(() => {
@@ -742,8 +761,16 @@ export default function HuixuApp() {
 
   function trackAnonymousEvent(name: string, data: Record<string, string | number> = {}) {
     if (analyticsConsent !== "accepted") return;
-    const tracker = (window as Window & { umami?: { track: (event: string, value?: Record<string, string | number>) => void } }).umami;
-    tracker?.track(name, data);
+    const analyticsWindow = window as Window & {
+      umami?: { track: (event: string, value?: Record<string, string | number>) => void };
+      _hmt?: Array<Array<string | number>>;
+    };
+    analyticsWindow.umami?.track(name, data);
+    if (window.location.hostname === analyticsDomain) {
+      analyticsWindow._hmt = analyticsWindow._hmt ?? [];
+      const label = Object.entries(data).map(([key, value]) => `${key}:${value}`).join("|");
+      analyticsWindow._hmt.push(["_trackEvent", "huixu", name, label]);
+    }
   }
 
   function answerAssessment(value: number) {
@@ -1665,7 +1692,7 @@ export default function HuixuApp() {
               <header><span className={styles.aboutShield} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5 19 6v5.5c0 4.3-2.8 7.4-7 9-4.2-1.6-7-4.7-7-9V6l7-2.5Z"/><path d="m9.2 12 1.8 1.8 3.9-4"/></svg></span><h2>关于你的数据</h2></header>
               <p>你的挑战、记录、日记和打卡内容都保存在设备本地。</p>
               <p>开发者无法查看、收集或上传你的任何记录、日记或打卡内容。</p>
-              <p>只有在你明确允许后，回序才会发送有限的匿名功能使用事件；你可以随时在“我的”页面关闭。</p>
+              <p>只有在你明确允许后，回序才会通过 Umami Cloud 和百度统计发送有限的匿名访问与功能使用事件；你可以随时在“我的”页面关闭。</p>
               <p>如果需要更换设备，请记得提前导出备份。</p>
             </section>
 
@@ -2169,7 +2196,7 @@ export default function HuixuApp() {
           <div className={styles.sheetBackdrop}>
             <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="匿名统计设置">
               <div className={styles.sheetHandle} /><small>数据与隐私</small><h2>帮助回序变得更好</h2>
-              <p>回序希望收集匿名的页面访问与功能使用统计，用于改进产品。不会上传你的每日记录、挑战内容、时间设置或备份文件。</p>
+              <p>回序希望通过 Umami Cloud 和百度统计收集匿名的页面访问与功能使用统计，用于改进产品。百度统计可能使用 Cookie 或匿名标识符；不会上传你的每日记录、挑战内容、时间设置或备份文件。</p>
               <button className={styles.primaryButton} onClick={() => { setAnalyticsConsent("accepted"); setAnalyticsPromptSeen(true); }}>允许匿名统计</button>
               <button className={styles.textButton} onClick={() => { setAnalyticsConsent("declined"); setAnalyticsPromptSeen(true); }}>不允许</button>
               <button className={styles.textButton} onClick={() => setAnalyticsPromptSeen(true)}>以后再决定</button>

@@ -100,7 +100,12 @@ test("anonymous analytics loads only after consent and keeps automatic tracking 
   assert.match(app, /script\.dataset\.domains = analyticsDomain/);
   assert.match(app, /huixu\.qingtaolabs\.com/);
   assert.match(app, /life_spark_opened/);
+  assert.match(app, /hm\.baidu\.com\/hm\.js/);
+  assert.match(app, /4e0dca8d470c4d1e78d8e1c283bbfd6c/);
+  assert.match(app, /_trackEvent/);
   assert.doesNotMatch(layout, /cloud\.umami\.is|data-website-id/);
-  assert.match(privacy, /Umami Cloud（欧盟数据区域）/);
+  assert.doesNotMatch(layout, /hm\.baidu\.com|4e0dca8d470c4d1e78d8e1c283bbfd6c/);
+  assert.match(privacy, /Umami Cloud（欧盟数据区域）和百度统计/);
+  assert.match(privacy, /Cookie 或匿名标识符/);
   assert.match(privacy, /用户拒绝或尚未作出选择时，不会发送这些事件/);
 });
