@@ -234,6 +234,7 @@ export default function HuixuApp() {
   const [pausedAt, setPausedAt] = useState("");
   const [pausedDays, setPausedDays] = useState(0);
   const [clockDate, setClockDate] = useState(() => todayKey());
+  const [viewDate, setViewDate] = useState(() => todayKey());
   const [now, setNow] = useState(() => Date.now());
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
   const [endingOpen, setEndingOpen] = useState(false);
@@ -254,6 +255,10 @@ export default function HuixuApp() {
   const importRef = useRef<HTMLInputElement>(null);
   const lifeSparkTimerRef = useRef<number>(0);
   const stateRevisionRef = useRef(0);
+
+  useEffect(() => {
+    setViewDate(clockDate);
+  }, [clockDate]);
 
   useEffect(() => {
     let active = true;
@@ -687,6 +692,25 @@ export default function HuixuApp() {
   });
   const undoSeconds = Math.max(0, Math.ceil((undoUntil - now) / 1000));
   const analyticsAvailable = Boolean(analyticsWebsiteId);
+  const viewingToday = viewDate === clockDate;
+  const challengeStartDate = customConfig?.startDate || (startedAt ? localDateKey(startedAt) : scheduledDate);
+  const selectedRecordByDate = history.find((record) => record.completedAt && localDateKey(record.completedAt) === viewDate);
+  const calculatedChallengeDay = challengeStartDate && viewDate >= challengeStartDate
+    ? calendarDayDifference(`${challengeStartDate}T12:00:00`, `${viewDate}T12:00:00`) - pausedDays + 1
+    : 0;
+  const selectedChallengeDay = selectedRecordByDate?.day ?? calculatedChallengeDay;
+  const selectedDateRecord = selectedRecordByDate ?? history.find((record) => selectedChallengeDay > 0 && record.day === selectedChallengeDay);
+  const selectedDateState: "before" | "after" | "past" | "future" = selectedChallengeDay <= 0
+    ? "before"
+    : selectedChallengeDay > currentRoute.days
+      ? "after"
+      : viewDate < clockDate
+        ? "past"
+        : "future";
+  const selectedDateTasks = selectedDateRecord?.tasks
+    ?? (selectedChallengeDay > 0 && selectedChallengeDay <= currentRoute.days
+      ? tasksForChallengeDay(challengeType, route, customConfig, selectedChallengeDay)
+      : []);
   const calendarCursor = new Date(`${recordMonthCursor}-01T12:00:00`);
   const calendarOffset = (calendarCursor.getDay() + 6) % 7;
   const calendarDays = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 0).getDate();
@@ -1747,13 +1771,45 @@ export default function HuixuApp() {
           <div className={styles.screenContent}>
             <header className={styles.appHeader}>
               <div>
-                <p>{currentRoute.name} · DAY {String(day).padStart(2, "0")} {lifecycle === "paused" ? "· 已暂停" : ""}</p>
-                <h1>{lifecycle === "paused" ? "先停一会儿" : settled ? "今天已记录" : "今天"}</h1>
+                <p>{currentRoute.name}{viewingToday || (selectedChallengeDay > 0 && selectedChallengeDay <= currentRoute.days) ? ` · DAY ${String(viewingToday ? day : selectedChallengeDay).padStart(2, "0")}` : " · 日期查看"} {viewingToday && lifecycle === "paused" ? "· 已暂停" : ""}</p>
+                <h1>{viewingToday ? lifecycle === "paused" ? "先停一会儿" : settled ? "今天已记录" : "今天" : new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(`${viewDate}T12:00:00`))}</h1>
               </div>
               <button className={styles.sunButton} aria-label="提醒设置" onClick={() => setSettingsOpen(true)}>☼</button>
             </header>
 
-            {lifecycle === "preparing" ? (
+            <WeekStrip today={clockDate} selected={viewDate} onSelect={setViewDate} />
+
+            {!viewingToday ? (
+              <section className={styles.readonlyDay}>
+                {selectedDateState === "before" ? <>
+                  <span className={styles.statusPill}>挑战尚未开始</span>
+                  <h2>这一天还没有挑战内容</h2>
+                  <p>本轮挑战将从 {challengeStartDate || scheduledDate} 开始，正式开始前不会生成挑战记录。</p>
+                </> : selectedDateState === "after" ? <>
+                  <span className={styles.statusPill}>挑战已结束</span>
+                  <h2>这一天已在本轮挑战之后</h2>
+                  <p>已经发生的挑战内容和记录仍会保留在此前的日期中。</p>
+                </> : <>
+                  <div className={styles.readonlyDayHeading}>
+                    <div><span>{selectedDateState === "future" ? "未开启" : selectedDateRecord?.status || "无记录"}</span><h2>DAY {String(selectedChallengeDay).padStart(2, "0")}</h2></div>
+                    <small>仅供查看，不可编辑</small>
+                  </div>
+                  {selectedDateTasks.length ? <div className={styles.readonlyTaskList}>
+                    {selectedDateTasks.map((task) => {
+                      const done = Boolean(selectedDateRecord?.doneIds.includes(task.id));
+                      const missed = Boolean(selectedDateRecord?.skippedIds?.includes(task.id));
+                      return <div key={task.id} className={done ? styles.readonlyTaskDone : ""}>
+                        <span className={`${styles.readonlyTaskIcon} ${styles[task.tone]}`}>{task.icon}</span>
+                        <b>{task.name}<small>{task.detail}{selectedDateRecord?.taskNotes?.[task.id] ? ` · ${selectedDateRecord.taskNotes[task.id]}` : ""}</small></b>
+                        <i>{selectedDateState === "future" ? "未开启" : done ? "✓" : missed ? "未完成" : "未记录"}</i>
+                      </div>;
+                    })}
+                  </div> : <div className={styles.emptyScheduledDay}><b>当天没有安排任务</b><p>这是自定义节律中的休息日，不需要完成挑战项目。</p></div>}
+                  {selectedDateRecord?.note && <blockquote>“{selectedDateRecord.note}”</blockquote>}
+                  {selectedDateState === "past" && !selectedDateRecord && <p className={styles.readonlyHint}>当天没有留下挑战记录，也不能补打卡或修改。</p>}
+                </>}
+              </section>
+            ) : lifecycle === "preparing" ? (
               <section className={styles.pausePanel}>
                 <BrandOrbit compact />
                 <span>挑战准备中</span>
@@ -1817,7 +1873,6 @@ export default function HuixuApp() {
               </section>
             ) : (
               <>
-                <WeekStrip />
                 <div className={styles.sectionTitle}>
                   <div>
                   <span>今日打卡</span>
@@ -2272,21 +2327,19 @@ function NavIcon({ name, fallback }: { name: Tab; fallback: string }) {
   return <span className={styles.navIcon}><svg viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg></span>;
 }
 
-function WeekStrip() {
-  const today = new Date();
-  const monday = new Date(today);
-  const offset = (today.getDay() + 6) % 7;
-  monday.setDate(today.getDate() - offset);
-  const labels = ["一", "二", "三", "四", "五", "六", "日"];
-  const days = labels.map((label, index) => {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + index);
-    return [label, String(date.getDate()), date.toDateString() === today.toDateString()] as const;
+function WeekStrip({ today, selected, onSelect }: { today: string; selected: string; onSelect: (date: string) => void }) {
+  const center = new Date(`${today}T12:00:00`);
+  const labels = ["日", "一", "二", "三", "四", "五", "六"];
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(center);
+    date.setDate(center.getDate() + index - 3);
+    const key = localDateKey(date);
+    return [labels[date.getDay()], String(date.getDate()), key] as const;
   });
   return (
-    <div className={styles.weekStrip}>
-      {days.map(([week, date, isToday]) => (
-        <span key={`${week}-${date}`} className={isToday ? styles.todayDate : ""}><small>{week}</small><b>{date}</b></span>
+    <div className={styles.weekStrip} aria-label="查看今天前后三天">
+      {days.map(([week, date, key]) => (
+        <button key={key} className={`${key === today ? styles.todayDate : ""} ${key === selected ? styles.selectedDate : ""}`} onClick={() => onSelect(key)} aria-pressed={key === selected} aria-label={`${key}${key === today ? "，今天" : ""}`}><small>{week}</small><b>{date}</b></button>
       ))}
     </div>
   );

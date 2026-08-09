@@ -63,6 +63,17 @@ test("challenge clock follows local dates, pauses elapsed days, and detects the 
   assert.equal(challengeHasEnded(start, new Date(2026, 7, 3, 23, 59, 0), 0, 3), false);
 });
 
+test("today page exposes a fixed seven-day read-only viewer", async () => {
+  const app = await readFile(new URL("app/HuixuApp.tsx", root), "utf8");
+  assert.match(app, /Array\.from\(\{ length: 7 \}/);
+  assert.match(app, /center\.getDate\(\) \+ index - 3/);
+  assert.match(app, /selectedDateState === "future" \? "未开启"/);
+  assert.match(app, /仅供查看，不可编辑/);
+  assert.match(app, /挑战尚未开始/);
+  assert.match(app, /挑战已结束/);
+  assert.match(app, /当天没有安排任务/);
+});
+
 test("custom challenge data includes the three rhythms and snapshot calculations", async () => {
   const source = await readFile(new URL("app/customChallenge.ts", root), "utf8");
   assert.match(source, /"daily" \| "every_other_day" \| "weekly"/);
