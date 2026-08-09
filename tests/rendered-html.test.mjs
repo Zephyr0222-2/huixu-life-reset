@@ -72,6 +72,7 @@ test("today page exposes a fixed seven-day read-only viewer", async () => {
   assert.match(app, /挑战尚未开始/);
   assert.match(app, /挑战已结束/);
   assert.match(app, /当天没有安排任务/);
+  assert.doesNotMatch(app, /取消完成/);
 });
 
 test("custom challenge data includes the three rhythms and snapshot calculations", async () => {

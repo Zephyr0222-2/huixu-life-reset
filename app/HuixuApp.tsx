@@ -2138,10 +2138,10 @@ export default function HuixuApp() {
                       rows={3}
                     />
                   </label>
-                  <button className={styles.primaryButton} onClick={() => {
+                  {!detailTask.done && <button className={styles.primaryButton} onClick={() => {
                     toggleCheckin(detailTask.id);
                     setDetailTask(null);
-                  }}>{detailTask.done ? "取消完成" : "标记为完成"}</button>
+                  }}>标记为完成</button>}
                   {!detailTask.done && <button className={styles.textButton} onClick={() => markIncomplete(detailTask.id)}>今天未完成</button>}
                 </>
               ) : detailRecord ? (
