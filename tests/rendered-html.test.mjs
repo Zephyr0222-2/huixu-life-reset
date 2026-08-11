@@ -64,15 +64,45 @@ test("challenge clock follows local dates, pauses elapsed days, and detects the 
 });
 
 test("today page exposes a fixed seven-day read-only viewer", async () => {
-  const app = await readFile(new URL("app/HuixuApp.tsx", root), "utf8");
+  const [app, css] = await Promise.all([
+    readFile(new URL("app/HuixuApp.tsx", root), "utf8"),
+    readFile(new URL("app/huixu.module.css", root), "utf8"),
+  ]);
   assert.match(app, /Array\.from\(\{ length: 7 \}/);
   assert.match(app, /center\.getDate\(\) \+ index - 3/);
+  assert.match(app, /key < today \? styles\.pastDate : key > today \? styles\.futureDate : styles\.todayDate/);
+  assert.match(css, /\.weekStrip button \{[\s\S]*?appearance: none;[\s\S]*?border: 0;/);
+  assert.match(css, /\.weekStrip \.pastDate/);
+  assert.match(css, /\.weekStrip \.futureDate/);
   assert.match(app, /selectedDateState === "future" \? "未开启"/);
   assert.match(app, /仅供查看，不可编辑/);
   assert.match(app, /挑战尚未开始/);
   assert.match(app, /挑战已结束/);
   assert.match(app, /当天没有安排任务/);
   assert.doesNotMatch(app, /取消完成/);
+});
+
+test("bilingual UI keeps local data compatible and includes the complete English catalog", async () => {
+  const [app, i18n, manifest, catalog] = await Promise.all([
+    readFile(new URL("app/HuixuApp.tsx", root), "utf8"),
+    readFile(new URL("app/i18n.ts", root), "utf8"),
+    readFile(new URL("public/manifest-en.webmanifest", root), "utf8"),
+    import("../app/i18n.generated.ts"),
+  ]);
+  assert.equal(Object.keys(catalog.englishTranslations).length, 1270);
+  assert.equal(catalog.englishTranslations["回序"], "Huixu");
+  assert.equal(catalog.englishTranslations["今天"], "Today");
+  assert.equal(catalog.englishTranslations["生活盲盒"], "Life Spark");
+  assert.match(app, /setLocale\(initialLocale\(\)\)/);
+  assert.match(app, /语言 \/ Language/);
+  assert.match(app, /manifest-en\.webmanifest/);
+  assert.match(i18n, /localStorage\.getItem\("huixu-v1-state"\)/);
+  assert.match(i18n, /window\.location\.pathname === "\/en"/);
+  assert.match(i18n, /new WeakMap<Node/);
+  assert.match(manifest, /Huixu \| Life Reset Challenge System/);
+  const englishPage = await readFile(new URL("app/en/page.tsx", root), "utf8");
+  assert.match(englishPage, /Huixu — Find Your Rhythm Again/);
+  assert.match(englishPage, /locale: "en_US"/);
 });
 
 test("custom challenge data includes the three rhythms and snapshot calculations", async () => {

@@ -43,6 +43,7 @@ import {
   localDateKey,
   pausedDaysAfterResume,
 } from "./challengeClock";
+import { initialLocale, persistLocale, translateDocument, translateText, type Locale } from "./i18n";
 
 type Screen = "welcome" | "routes" | "assessment" | "setup" | "custom-builder" | "life-spark" | "about" | "feedback" | "app";
 type Tab = "today" | "progress" | "records" | "history" | "me";
@@ -165,7 +166,7 @@ function chooseNewestState(indexed: unknown, local: unknown) {
 
 function BrandOrbit({ compact = false }: { compact?: boolean }) {
   return (
-    <div className={`${styles.orbit} ${compact ? styles.orbitCompact : ""}`} aria-hidden="true">
+    <div className={`${styles.orbit} ${compact ? styles.orbitCompact : ""}`} aria-hidden="true" data-no-translate>
       <i className={styles.orbitBlue} />
       <i className={styles.orbitPurple} />
       <span className={styles.orbitDotBlue} />
@@ -252,6 +253,8 @@ export default function HuixuApp() {
   const [clearDataAcknowledged, setClearDataAcknowledged] = useState(false);
   const [routesFromApp, setRoutesFromApp] = useState(false);
   const [supplementText, setSupplementText] = useState("");
+  const [locale, setLocale] = useState<Locale>("zh-CN");
+  const [localeReady, setLocaleReady] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const lifeSparkTimerRef = useRef<number>(0);
   const stateRevisionRef = useRef(0);
@@ -259,6 +262,32 @@ export default function HuixuApp() {
   useEffect(() => {
     setViewDate(clockDate);
   }, [clockDate]);
+
+  useEffect(() => {
+    setLocale(initialLocale());
+    setLocaleReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!localeReady) return;
+    persistLocale(locale);
+    document.documentElement.lang = locale;
+    document.title = locale === "en" ? "Huixu — Find Your Rhythm Again" : "回序｜从混乱，回到自己的节奏";
+    document.querySelector<HTMLMetaElement>('meta[name="description"]')?.setAttribute("content", locale === "en" ? "A gentle, local-first challenge tool for rebuilding a livable daily rhythm." : "一套帮助你重新建立稳定生活秩序的渐进式挑战系统。");
+    document.querySelector<HTMLLinkElement>('link[rel="manifest"]')?.setAttribute("href", locale === "en" ? "/manifest-en.webmanifest" : "/manifest.webmanifest");
+    translateDocument(document, locale);
+    let queued = false;
+    const observer = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        translateDocument(document, locale);
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [locale, hydrated, localeReady]);
 
   useEffect(() => {
     let active = true;
@@ -745,8 +774,16 @@ export default function HuixuApp() {
   }
 
   function showToast(message: string) {
-    setToast(message);
+    setToast(translateText(message, locale));
     window.setTimeout(() => setToast(""), 2200);
+  }
+
+  function confirmText(message: string) {
+    return window.confirm(translateText(message, locale));
+  }
+
+  function promptText(message: string, defaultValue: string) {
+    return window.prompt(translateText(message, locale), translateText(defaultValue, locale));
   }
 
   async function requestReminderPermission() {
@@ -764,8 +801,8 @@ export default function HuixuApp() {
   async function showReminderNotification(kind: "morning" | "evening" | "test") {
     const registration = await navigator.serviceWorker.ready;
     const isEvening = kind === "evening";
-    await registration.showNotification(kind === "test" ? "回序 · 测试提醒" : isEvening ? "回序 · 晚间收尾" : "回序 · 今天", {
-      body: kind === "test" ? "系统提醒已成功开启。之后会按你设置的时间出现。" : isEvening ? "今天的记录还没有结束，需要时可以回来继续。" : "今天的挑战已经准备好，从能承受的一件事开始。",
+    await registration.showNotification(translateText(kind === "test" ? "回序 · 测试提醒" : isEvening ? "回序 · 晚间收尾" : "回序 · 今天", locale), {
+      body: translateText(kind === "test" ? "系统提醒已成功开启。之后会按你设置的时间出现。" : isEvening ? "今天的记录还没有结束，需要时可以回来继续。" : "今天的挑战已经准备好，从能承受的一件事开始。", locale),
       icon: "/icon-v3-192.png",
       badge: "/icon-v3-192.png",
       tag: `huixu-${kind}`,
@@ -849,7 +886,7 @@ export default function HuixuApp() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `回序备份-${todayKey()}.huixu`;
+    anchor.download = `${locale === "en" ? "Huixu-backup" : "回序备份"}-${todayKey()}.huixu`;
     anchor.click();
     URL.revokeObjectURL(url);
     showToast("备份文件已生成");
@@ -870,7 +907,7 @@ export default function HuixuApp() {
     const lines = [
       `# 回序 · ${currentRoute.name}`,
       "",
-      `开始时间：${startedAt ? new Date(startedAt).toLocaleString("zh-CN") : "尚未开始"}`,
+      `开始时间：${startedAt ? new Date(startedAt).toLocaleString(locale) : "尚未开始"}`,
       `当前进度：DAY ${day} / ${currentRoute.days}`,
       "",
       ...history.flatMap((record) => [
@@ -880,7 +917,7 @@ export default function HuixuApp() {
         "",
       ]),
     ];
-    downloadMarkdown(lines, `回序记录-${todayKey()}.md`);
+    downloadMarkdown(locale === "en" ? lines.map((line) => translateText(line, locale)) : lines, `${locale === "en" ? "Huixu-records" : "回序记录"}-${todayKey()}.md`);
     showToast("阅读导出已生成");
     trackAnonymousEvent("markdown_exported", { route });
   }
@@ -891,7 +928,7 @@ export default function HuixuApp() {
     const lines = [
       `# 回序 · ${archiveName}`,
       "",
-      `挑战时间：${new Date(archive.startedAt).toLocaleDateString("zh-CN")} — ${new Date(archive.endedAt).toLocaleDateString("zh-CN")}`,
+      `挑战时间：${new Date(archive.startedAt).toLocaleDateString(locale)} — ${new Date(archive.endedAt).toLocaleDateString(locale)}`,
       `挑战结果：${archive.status === "finished" ? "自然结束" : archive.status === "ended" ? "提前结束" : "已归档"}`,
       "",
       ...archive.history.flatMap((record) => [
@@ -901,7 +938,7 @@ export default function HuixuApp() {
         "",
       ]),
     ];
-    downloadMarkdown(lines, `回序-${archiveName}-${archive.startedAt.slice(0, 10)}.md`);
+    downloadMarkdown(locale === "en" ? lines.map((line) => translateText(line, locale)) : lines, `${locale === "en" ? "Huixu" : "回序"}-${translateText(archiveName, locale)}-${archive.startedAt.slice(0, 10)}.md`);
     showToast("历史挑战 Markdown 已生成");
   }
 
@@ -911,9 +948,11 @@ export default function HuixuApp() {
       try {
         const saved = JSON.parse(text);
         if (!saved.route || !saved.checkins || !Array.isArray(saved.history)) throw new Error();
-        const mode = window.prompt(`备份包含 ${saved.history.length} 条当前记录、${saved.archives?.length ?? 0} 轮归档。\n输入“合并”保留本机归档，输入“替换”使用备份覆盖。`, "合并");
-        if (mode !== "合并" && mode !== "替换") return;
-        const restoredBase = mode === "合并"
+        const mergeLabel = translateText("合并", locale);
+        const replaceLabel = translateText("替换", locale);
+        const mode = promptText(`备份包含 ${saved.history.length} 条当前记录、${saved.archives?.length ?? 0} 轮归档。\n输入“合并”保留本机归档，输入“替换”使用备份覆盖。`, "合并");
+        if (mode !== mergeLabel && mode !== replaceLabel) return;
+        const restoredBase = mode === mergeLabel
           ? { ...saved, archives: [...(saved.archives ?? []), ...archives.filter((local) => !(saved.archives ?? []).some((remote: ChallengeArchive) => remote.id === local.id))] }
           : saved;
         const restored = { ...restoredBase, stateRevision: Number(restoredBase.stateRevision ?? 0) + 1, stateUpdatedAt: Date.now(), schemaVersion: 8 };
@@ -943,7 +982,7 @@ export default function HuixuApp() {
 
   function startRoute(key: RouteKey) {
     if (routesFromApp && (history.length || startedAt)) {
-      if (!window.confirm("开启新路线会结束并归档当前挑战。是否继续？")) {
+      if (!confirmText("开启新路线会结束并归档当前挑战。是否继续？")) {
         setScreen("app");
         return;
       }
@@ -1049,7 +1088,7 @@ export default function HuixuApp() {
   function createCustomChallenge() {
     if (!customDraft.selectedTasks.some((task) => task.rhythmType === "daily")) return showToast("请至少保留一项每天执行的挑战");
     if (routesFromApp && (history.length || startedAt)) {
-      if (!window.confirm("开启自定义挑战会结束并归档当前挑战。是否继续？")) { setScreen("app"); return; }
+      if (!confirmText("开启自定义挑战会结束并归档当前挑战。是否继续？")) { setScreen("app"); return; }
       archiveCurrent("ended");
     } else if (history.length || startedAt) archiveCurrent(lifecycle);
     const createdAt = new Date().toISOString();
@@ -1116,7 +1155,7 @@ export default function HuixuApp() {
       return;
     }
     const unanswered = checkins.filter((item) => !item.done && !skippedIds.includes(item.id));
-    if (unanswered.length && !window.confirm(`还有 ${unanswered.length} 项没有选择。继续结算会将它们记录为“今天未完成”，是否继续？`)) return;
+    if (unanswered.length && !confirmText(`还有 ${unanswered.length} 项没有选择。继续结算会将它们记录为“今天未完成”，是否继续？`)) return;
     const finalSkipped = [...new Set([...skippedIds, ...unanswered.map((item) => item.id)])];
     const doneIds = checkins.filter((item) => item.done).map((item) => item.id);
     const result = statusForChallengeDay(challengeType, route, customConfig, checkins, doneIds, day);
@@ -1210,7 +1249,7 @@ export default function HuixuApp() {
 
   function addSupplement(record: DailyRecord) {
     if (!supplementText.trim()) return;
-    const stamp = new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date());
+    const stamp = new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date());
     setHistory((items) => items.map((item) => item.day === record.day ? { ...item, note: `${item.note}${item.note ? "\n\n" : ""}后来补记（${stamp}）：${supplementText.trim()}` } : item));
     setDetailRecord((current) => current ? { ...current, note: `${current.note}${current.note ? "\n\n" : ""}后来补记（${stamp}）：${supplementText.trim()}` } : current);
     setSupplementText("");
@@ -1317,9 +1356,10 @@ export default function HuixuApp() {
     return (
       <main className={styles.centerStage}>
         <section className={styles.welcome}>
+          <button className={styles.languageToggle} onClick={() => setLocale((value) => value === "zh-CN" ? "en" : "zh-CN")} aria-label={locale === "zh-CN" ? "Switch to English" : "切换到中文"}>{locale === "zh-CN" ? "EN" : "中文"}</button>
           <div className={styles.brandTop}>
             <span>回序</span>
-            <small>HUÍ XÙ</small>
+            <small>{locale === "en" ? "FIND YOUR RHYTHM AGAIN" : "HUÍ XÙ"}</small>
           </div>
           <BrandOrbit />
           <div className={styles.welcomeCopy}>
@@ -1639,7 +1679,7 @@ export default function HuixuApp() {
               {(lifeSparkView === "favorites" ? favoriteItems : triedItems.map((record) => record.item)).length === 0 && <div className={styles.emptyState}>{lifeSparkView === "favorites" ? "遇到喜欢的内容时，可以把它收藏在这里。" : "点击结果卡片里的“就试试”，内容会出现在这里。"}</div>}
               {(lifeSparkView === "favorites" ? favoriteItems : triedItems.map((record) => record.item)).map((item) => {
                 const tried = lifeSparkData.triedItems.find((record) => record.itemId === item.id);
-                return <article key={item.id}><button onClick={() => setLifeSparkResult(item)}><small>{item.categoryName}{lifeSparkView === "tried" && tried ? ` · ${new Date(tried.triedAt).toLocaleDateString("zh-CN")}` : ""}</small><b>{item.title}</b><i>›</i></button>{lifeSparkView === "favorites" && <button className={styles.lifeSparkRemove} onClick={() => toggleLifeSparkFavorite(item.id)}>取消收藏</button>}</article>;
+                return <article key={item.id}><button onClick={() => setLifeSparkResult(item)}><small>{item.categoryName}{lifeSparkView === "tried" && tried ? ` · ${new Date(tried.triedAt).toLocaleDateString(locale)}` : ""}</small><b>{item.title}</b><i>›</i></button>{lifeSparkView === "favorites" && <button className={styles.lifeSparkRemove} onClick={() => toggleLifeSparkFavorite(item.id)}>取消收藏</button>}</article>;
               })}
             </div>
           </section>}
@@ -1772,7 +1812,7 @@ export default function HuixuApp() {
             <header className={styles.appHeader}>
               <div>
                 <p>{currentRoute.name}{viewingToday || (selectedChallengeDay > 0 && selectedChallengeDay <= currentRoute.days) ? ` · DAY ${String(viewingToday ? day : selectedChallengeDay).padStart(2, "0")}` : " · 日期查看"} {viewingToday && lifecycle === "paused" ? "· 已暂停" : ""}</p>
-                <h1>{viewingToday ? lifecycle === "paused" ? "先停一会儿" : settled ? "今天已记录" : "今天" : new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(`${viewDate}T12:00:00`))}</h1>
+                <h1>{viewingToday ? lifecycle === "paused" ? "先停一会儿" : settled ? "今天已记录" : "今天" : new Intl.DateTimeFormat(locale, { month: "long", day: "numeric" }).format(new Date(`${viewDate}T12:00:00`))}</h1>
               </div>
               <button className={styles.sunButton} aria-label="提醒设置" onClick={() => setSettingsOpen(true)}>☼</button>
             </header>
@@ -1983,7 +2023,7 @@ export default function HuixuApp() {
                 <option value="all">全部状态</option><option value="counted">已达标</option><option value="not-counted">未达标／未记录</option>
               </select>
             </div>
-            {recordMode === "calendar" && <div className={styles.recordMonth}><button onClick={() => changeRecordMonth(-1)} aria-label="上个月">‹</button><b>{new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(calendarCursor)}</b><button onClick={() => changeRecordMonth(1)} aria-label="下个月">›</button></div>}
+            {recordMode === "calendar" && <div className={styles.recordMonth}><button onClick={() => changeRecordMonth(-1)} aria-label="上个月">‹</button><b>{new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" }).format(calendarCursor)}</b><button onClick={() => changeRecordMonth(1)} aria-label="下个月">›</button></div>}
             {recordMode === "calendar" ? (
               <div className={styles.recordCalendar}>
                 {['一','二','三','四','五','六','日'].map((label) => <span className={styles.calendarWeekday} key={label}>{label}</span>)}
@@ -2024,7 +2064,7 @@ export default function HuixuApp() {
               {archives.map((item) => (
                 <button key={item.id} onClick={() => { setArchiveOpen(item); setArchiveRecordOpen(null); }}>
                   <span>{item.status === "finished" ? "✓" : "↗"}</span>
-                  <div><small>{new Date(item.startedAt).toLocaleDateString("zh-CN")} — {new Date(item.endedAt).toLocaleDateString("zh-CN")}</small><b>{challengeDisplayName(item.challengeType === "custom" ? "custom" : "fixed", item.route, item.customConfig ?? null)}</b><p>{item.history.length} 天记录 · {item.status === "finished" ? "已完成" : "已结束"}</p></div>
+                  <div><small>{new Date(item.startedAt).toLocaleDateString(locale)} — {new Date(item.endedAt).toLocaleDateString(locale)}</small><b>{challengeDisplayName(item.challengeType === "custom" ? "custom" : "fixed", item.route, item.customConfig ?? null)}</b><p>{item.history.length} 天记录 · {item.status === "finished" ? "已完成" : "已结束"}</p></div>
                   <i>›</i>
                 </button>
               ))}
@@ -2084,6 +2124,7 @@ export default function HuixuApp() {
             <section className={styles.settingsSection}>
               <h2>应用设置</h2>
               <div className={styles.settingsGroup}>
+                <button onClick={() => setLocale((value) => value === "zh-CN" ? "en" : "zh-CN")}><span>{locale === "zh-CN" ? "文" : "A"}</span><div><b>语言 / Language</b><small>{locale === "zh-CN" ? "中文 · Switch to English" : "English · 切换到中文"}</small></div></button>
                 <button onClick={installApp}><span>▣</span><div><b>{appInstalled ? "回序已安装" : "安装回序"}</b><small>{appInstalled ? "可从桌面或主屏幕直接打开" : "添加到手机主屏幕或电脑桌面"}</small></div></button>
                 <button onClick={() => {
                   if (!analyticsAvailable) return showToast("匿名统计尚未接入，目前不会发送任何数据");
@@ -2092,7 +2133,7 @@ export default function HuixuApp() {
                 }}><span>◉</span><div><b>匿名使用统计</b><small>{!analyticsAvailable ? "尚未接入 · 当前不会发送数据" : analyticsConsent === "accepted" ? "已开启 · 点击关闭" : "已关闭 · 点击开启"}</small></div></button>
                 <button onClick={() => setScreen("feedback")}><span>✦</span><div><b>反馈与建议</b><small>填写回序用户满意度调查</small></div></button>
                 <button onClick={() => setSupportOpen(true)}><span>♡</span><div><b>支持回序</b><small>自愿打赏，帮助回序继续维护</small></div></button>
-                <button onClick={() => setScreen("about")}><span>序</span><div><b>关于回序</b><small>了解产品理念、隐私与反馈</small></div></button>
+                <button onClick={() => setScreen("about")}><span data-no-translate>序</span><div><b>关于回序</b><small>了解产品理念、隐私与反馈</small></div></button>
               </div>
             </section>
             <section className={`${styles.settingsSection} ${styles.dangerSection}`}>
@@ -2156,7 +2197,7 @@ export default function HuixuApp() {
                       </div>
                     ))}
                   </div>
-                  {detailRecord.completedAt && <p className={styles.completedTime}>结算于 {new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(detailRecord.completedAt))}</p>}
+                  {detailRecord.completedAt && <p className={styles.completedTime}>结算于 {new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(new Date(detailRecord.completedAt))}</p>}
                   {detailRecord.note && <blockquote>“{detailRecord.note}”</blockquote>}
                   <label className={styles.actionInput}><span>后来补记（不会修改当天结果）</span><textarea value={supplementText} onChange={(event) => setSupplementText(event.target.value)} rows={2} placeholder="补充当时的感受或细节" /></label>
                   <button className={styles.secondaryButton} onClick={() => addSupplement(detailRecord)}>保存补记</button>
@@ -2232,7 +2273,7 @@ export default function HuixuApp() {
           <div className={styles.sheetBackdrop} onClick={() => { setArchiveOpen(null); setArchiveRecordOpen(null); }}>
             <section className={styles.detailSheet} role="dialog" aria-modal="true" aria-label="挑战归档" onClick={(event) => event.stopPropagation()}>
               <div className={styles.sheetHandle} /><small>历史挑战</small><h2>{challengeDisplayName(archiveOpen.challengeType === "custom" ? "custom" : "fixed", archiveOpen.route, archiveOpen.customConfig ?? null)}</h2>
-              <p>{new Date(archiveOpen.startedAt).toLocaleDateString("zh-CN")} — {new Date(archiveOpen.endedAt).toLocaleDateString("zh-CN")} · {archiveOpen.history.length} 天记录</p>
+              <p>{new Date(archiveOpen.startedAt).toLocaleDateString(locale)} — {new Date(archiveOpen.endedAt).toLocaleDateString(locale)} · {archiveOpen.history.length} 天记录</p>
               {archiveRecordOpen ? <>
                 <button className={styles.archiveBack} onClick={() => setArchiveRecordOpen(null)}>‹ 返回挑战记录</button>
                 <h3>DAY {String(archiveRecordOpen.day).padStart(2, "0")} · {archiveRecordOpen.stage}</h3>
@@ -2339,7 +2380,7 @@ function WeekStrip({ today, selected, onSelect }: { today: string; selected: str
   return (
     <div className={styles.weekStrip} aria-label="查看今天前后三天">
       {days.map(([week, date, key]) => (
-        <button key={key} className={`${key === today ? styles.todayDate : ""} ${key === selected ? styles.selectedDate : ""}`} onClick={() => onSelect(key)} aria-pressed={key === selected} aria-label={`${key}${key === today ? "，今天" : ""}`}><small>{week}</small><b>{date}</b></button>
+        <button key={key} className={`${key < today ? styles.pastDate : key > today ? styles.futureDate : styles.todayDate} ${key === selected ? styles.selectedDate : ""}`} onClick={() => onSelect(key)} aria-pressed={key === selected} aria-label={`${key}${key === today ? "，今天" : ""}`}><small>{week}</small><b>{date}</b></button>
       ))}
     </div>
   );
